@@ -44,4 +44,5 @@ To train a model, simply execute training script with its config file:
 python3 train_masked_model.py train_masked_config.yaml
 ```
 
+The model checkpoint will be saved in the directory specified in training config (by default `./checkpoints`). 
 
