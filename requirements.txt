@@ -1,0 +1,13 @@
+tifffile==2023.7.10
+torch==2.4.1
+numpy==1.24.4
+torchvision==0.19.1
+tqdm==4.67.1
+nltk==3.9.1
+neptune==1.13.0
+matplotlib==3.7.5
+pandas==2.0.3
+scikit-image==0.21.0
+scikit-learn==1.3.2
+seaborn==0.13.2
+ruamel.yaml==0.18.10
