@@ -479,6 +479,8 @@ class MultiplexAutoencoder(nn.Module):
         self.latent_dim = encoder_config['embedding_dims'][-1]
         self.decoder_dim = decoder_config['decoded_embed_dim']
         self.num_channels = num_channels
+        self.superkernel_conv_padding = (superkernel_config.get('kernel_size') or 0) // 2
+        self.superkernel_conv_stride = superkernel_config.get('stride', 1)
 
         self.act = nn.GELU()
 
