@@ -22,7 +22,7 @@ num_workers: 8
 batch_size: 2
 
 # Training configuration
-device: cuda:1
+device: cuda:0
 lr: 5e-4
 final_lr: 1e-6
 weight_decay: 0.0001

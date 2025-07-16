@@ -225,6 +225,9 @@ if __name__ == '__main__':
     yaml = YAML(typ='safe')
     with open(config_path, 'r') as f:
         config = yaml.load(f)
+    
+    with open("secrets/neptune.yaml", 'r') as f:
+        secrets = yaml.load(f)
 
 
     device = config['device']
@@ -307,8 +310,8 @@ if __name__ == '__main__':
         start_epoch = 0
 
     run = neptune.init_run(
-        project=config['neptune_project'],
-        api_token=config['neptune_api_token'],
+        project=secrets['neptune_project'],
+        api_token=secrets['neptune_api_token'],
         tags=config['tags'],
     )
 

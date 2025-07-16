@@ -1,6 +1,6 @@
 paths:
-  train: /raid_encrypted/immucan/immuvis_split/train
-  test: /raid_encrypted/immucan/immuvis_split/test
+  train: /raid/immucan/immuvis_splits/train
+  test: /raid/immucan/immuvis_splits/test
 datasets:
 - ajaib
 - bc2
