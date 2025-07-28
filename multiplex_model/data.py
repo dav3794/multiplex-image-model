@@ -182,6 +182,11 @@ class SegmentationDataset(Dataset):
         )
         return torch.tensor(scaled_img)
         
+    @staticmethod
+    def global_normalize(np_img):
+        np_img = np.clip(np_img, 0, 3)
+        return np_img / 3.0
+
     def __len__(self):
         return len(self.imgs)
 
@@ -194,7 +199,7 @@ class SegmentationDataset(Dataset):
         img = self.preprocess(img)
 
         img = self.butterworth(img)
-        img = self.norm_minmax(img)
+        # img = self.norm_minmax(img)
 
         mask = tifffile.imread(mask_path)
         if self.mask_labels_mapping is not None:

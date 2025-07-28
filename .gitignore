@@ -211,3 +211,7 @@ venv/
 checkpoints/ 
 
 secrets/
+
+.neptune/
+
+logs/
