@@ -8,9 +8,9 @@ superkernel:
 
 encoder:
     layers_blocks: [1, 1, 1]
-    # embedding_dims: [192, 384, 768]
+    embedding_dims: [192, 384, 768]
     # embedding_dims: [10, 20, 40]
-    embedding_dims: [100, 200, 400]
+    # embedding_dims: [100, 200, 400]
     maximum_frequency: 1
 
 decoder:
@@ -20,12 +20,12 @@ decoder:
 # Data configuration
 panel_config: configs/all_panels_config.yaml
 tokenizer_config: configs/all_markers_tokenizer.yaml
-input_image_size: [112, 112]
+input_image_size: [113, 113]
 num_workers: 0
 batch_size: 4
 
 # Training configuration
-device: cuda:0
+device: cpu
 lr: 5e-4
 final_lr: 1e-6
 weight_decay: 0.0001
@@ -38,6 +38,6 @@ checkpoints_dir: checkpoints
 save_checkpoint_freq: 50
 
 # Neptune logging configuration
-tags: ['ConvNext', 'panel-1 data', 'Gaussian NLL', 'Steerable', 'escnn', 'tanh scaling', 'with-impainting', 'global_normalize']
+tags: ['ConvNext', 'panel-1 data', 'Gaussian NLL', 'Steerable', 'escnn', 'tanh scaling', 'with-impainting', 'global_normalize', 'output-trim']
 run_prefix: 'EquivariantConvnext'
 model_type: "EquivariantConvnext"

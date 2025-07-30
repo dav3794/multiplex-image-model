@@ -13,6 +13,8 @@ from torchvision.transforms import Compose
 from torchvision.transforms import RandomRotation, RandomCrop
 from torchvision.transforms.functional import InterpolationMode
 from tqdm import tqdm
+import torch.nn.functional as F
+
 
 from multiplex_model.data import DatasetFromTIFF, PanelBatchSampler, TestCrop
 from multiplex_model.losses import nll_loss
@@ -83,7 +85,8 @@ def train_masked(
             masked_img = masked_img.to(torch.float32)
 
             with autocast(device_type='cuda', dtype=torch.bfloat16):
-                output = model(masked_img, active_channel_ids, channel_ids)['output']
+                # output = model(masked_img, active_channel_ids, channel_ids)['output']
+                output = model(masked_img, active_channel_ids, channel_ids)['output'][:, :, 3:-4, 3:-4]
                 # output = model(masked_img, active_channel_ids, active_channel_ids)['output']
                 mi, logsigma = output.unbind(dim=-1)
                 mi = torch.sigmoid(mi)
@@ -193,8 +196,10 @@ def test_masked(
             channel_ids = channel_ids.to(device)
             masked_img = masked_img.to(torch.float32)
             img = img.to(device)
+            
 
-            output = model(masked_img, active_channel_ids, channel_ids)['output']
+            # output = model(masked_img, active_channel_ids, channel_ids)['output']
+            output = model(masked_img, active_channel_ids, channel_ids)['output'][:, :, 3:-4, 3:-4]  # Remove padding
             mi, logsigma = output.unbind(dim=-1)
             mi = torch.sigmoid(mi)
   

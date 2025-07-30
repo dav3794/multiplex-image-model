@@ -152,6 +152,7 @@ class EquivariantMultiplexAutoencoderOld(nn.Module):
         # x = features.permute(0, 2, 1).reshape(B, 768, 14, 14)
 
         x = self.decoder(x, decoded_indices)
+        # x = x[:, :, ]
         
         # print(f"decoded isnan: {torch.isnan(x).any()}")
         # print(f'After decoder shape: {x.shape}')
