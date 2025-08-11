@@ -12,6 +12,6 @@
 # module load cuda/11.7             # ensure correct CUDA setup
 source ~/venvs/immu-vis/bin/activate    # activate your Python environment
 
-srun python ./train_masked_model.py /home/szlukasik/immu-vis/multiplex-image-model/train_masked_config.yaml
+# srun python ./train_masked_model.py /home/szlukasik/immu-vis/multiplex-image-model/train_masked_config.yaml
 
-# srun python ./train_masked_model.py "/home/szlukasik/immu-vis/multiplex-image-model/train_masked_equivariant_config.yaml" 
+srun python ./train_masked_model_old_loader.py "/home/szlukasik/immu-vis/multiplex-image-model/train_masked_equivariant_config_old_loader.yaml" 

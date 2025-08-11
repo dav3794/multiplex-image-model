@@ -118,7 +118,7 @@ class EquivariantMultiplexAutoencoderOld(nn.Module):
         # print((f"Decoded indices isnan: {torch.isnan(decoded_indices).any()}, "))
         superkernel_weights = self.superkernel(encoded_indices)
 
-        # print(f'Superkernel weights shape: {superkernel_weights.shape}')
+
         # print((f"Superkernel weights isnan: {torch.isnan(superkernel_weights).any()}, "))
         if self.superkernel_layer_type == 'conv':
             x = torch.cat([
@@ -239,7 +239,9 @@ class EquivariantMultiplexAutoencoder(nn.Module):
 
         # pixel_shift_weights = pixel_shift_weights.reshape(B, C, 1, 1)
         # x = x + pixel_shift_weights
+        # print(f'Input shape: {x.shape}, Encoded indices shape: {encoded_indices.shape}')
 
+        # print(f'Superkernel weights shape: {superkernel_weights.shape}')
         if self.superkernel.layer_type == 'conv':
             x = torch.cat([
                 F.conv2d(
