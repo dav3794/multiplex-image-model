@@ -20,6 +20,8 @@ class DatasetFromTIFF(Dataset):
             transform=None,
             use_median_denoising: bool = False,
             use_butterworth_filter: bool = True,
+            use_minmax_normalization: bool = True,
+            use_clip_normalization: bool = False,
         ):
         assert 'paths' in panels_config, "Panels config must have 'paths' attribute with paths of splits of the data."
         assert split in panels_config['paths'], f"Panels config must have '{split}' attribute with data path."
@@ -48,7 +50,9 @@ class DatasetFromTIFF(Dataset):
         self.transform = transform
         self.use_denoising = use_median_denoising
         self.use_butterworth = use_butterworth_filter
-    
+        self.use_minmax_normalization = use_minmax_normalization
+        self.use_clip_normalization = use_clip_normalization
+
     @staticmethod
     def preprocess(img):
         return np.arcsinh(img / 5.0)
@@ -81,6 +85,12 @@ class DatasetFromTIFF(Dataset):
         scaled_img = np.clip(scaled_img, 0, 1)
         return torch.tensor(scaled_img)
     
+    @staticmethod
+    def norm_clip(img, upper_bound=3):
+        """Normalize image channels to [0, 1] range using clipping."""
+        img = np.clip(img, 0, upper_bound) / upper_bound
+        return torch.tensor(img)
+    
     # def strip_channels(self, img, dataset):
     #     """Strip absent channels from the image based on the dataset config."""
     #     active_channels = self.active_channels[dataset]
@@ -107,7 +117,11 @@ class DatasetFromTIFF(Dataset):
         if self.use_denoising:
             img = self.denoise(img)
 
-        img = self.norm_minmax(img)
+        if self.use_clip_normalization:
+            img = self.norm_clip(img)
+
+        if self.use_minmax_normalization:
+            img = self.norm_minmax(img)
         
         return img, channel_ids, dataset, img_path
 

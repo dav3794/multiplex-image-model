@@ -11,6 +11,7 @@ from torch.amp import GradScaler, autocast
 from torch.utils.data import DataLoader
 from torchvision.transforms import Compose
 from torchvision.transforms import RandomRotation, RandomCrop
+from torchvision.transforms.functional import InterpolationMode
 from tqdm import tqdm
 
 from multiplex_model.data import DatasetFromTIFF, PanelBatchSampler, TestCrop
@@ -92,6 +93,7 @@ def train_masked(
                     assert False, "Non-finite loss encountered. Check the model and data."
 
             scaler.scale(loss / gradient_accumulation_steps).backward()
+            # scaler.scale(loss).backward()
 
             if (batch_idx+1) % gradient_accumulation_steps == 0:
                 scaler.unscale_(optimizer)
@@ -237,7 +239,10 @@ if __name__ == '__main__':
     INV_TOKENIZER = {v: k for k, v in TOKENIZER.items()}
 
     train_transform = Compose([
-        RandomRotation(180),
+        RandomRotation(
+            180, 
+            interpolation=InterpolationMode.BILINEAR
+        ),
         RandomCrop(SIZE),
     ])
 
@@ -249,7 +254,9 @@ if __name__ == '__main__':
         marker_tokenizer=TOKENIZER,
         transform=train_transform,
         use_median_denoising=False,
-        use_butterworth_filter=True
+        use_butterworth_filter=True,
+        use_minmax_normalization=False,
+        use_clip_normalization=True
     )
 
     test_dataset = DatasetFromTIFF(
@@ -258,7 +265,9 @@ if __name__ == '__main__':
         marker_tokenizer=TOKENIZER,
         transform=test_transform,
         use_median_denoising=False,
-        use_butterworth_filter=True
+        use_butterworth_filter=True,
+        use_minmax_normalization=False,
+        use_clip_normalization=True
     )
 
     train_batch_sampler = PanelBatchSampler(train_dataset, BATCH_SIZE)
