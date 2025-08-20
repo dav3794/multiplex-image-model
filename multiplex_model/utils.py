@@ -42,7 +42,9 @@ def get_scheduler_with_warmup(
         num_warmup_steps: int,
         num_annealing_steps: int,
         final_lr: float,
-        type: Literal['cosine', 'linear'] = 'cosine'
+        type: Literal['cosine', 'linear'] = 'cosine',
+        start_lr: float = None,
+        lr: float = None,
     ) -> LambdaLR:
     """Get cosine annealing scheduler with warmup, adapted from:
     https://github.com/huggingface/transformers/blob/v4.23.1/src/transformers/optimization.py#L104

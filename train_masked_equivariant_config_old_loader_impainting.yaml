@@ -40,6 +40,6 @@ checkpoints_dir: checkpoints
 save_checkpoint_freq: 40
 
 # Neptune logging configuration
-tags: ['ConvNext', 'panel-1 data', 'Gaussian NLL', 'Steerable', 'escnn', 'realx2 tanh scaling', 'no-impainting', 'global_normalize', 'output-trim', 'only-dataset-markers', 'old_loader', 'all-time-warmup']
+tags: ['ConvNext', 'panel-1 data', 'Gaussian NLL', 'Steerable', 'escnn', 'realx2 tanh scaling', 'with-impainting', 'global_normalize', 'output-trim', 'only-dataset-markers', 'old_loader', 'all-time-warmup']
 run_prefix: 'EquivariantConvnext'
 model_type: "EquivariantConvnext"

@@ -1,8 +1,8 @@
 #!/usr/bin/env python3
 import os, csv, glob, pathlib, shutil
 
-SRC_ROOT = "/raid_encrypted/immucan/IMC/NSCLC2/IMC1/unzipped"
-DST_ROOT = "/home/szlukasik/immu-vis/data/immuvis_all2"
+SRC_ROOT = "/raid/immucan/IMC/NSCLC2/IMC1/unzipped"
+DST_ROOT = "/raid/szlukasik/immu-vis/data/immuvis_all2"
 DATASET_NAME = "nsclc2-panel1"
 
 for split in ("train", "test"):

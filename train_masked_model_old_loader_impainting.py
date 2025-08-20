@@ -11,9 +11,10 @@ from torch.amp import GradScaler, autocast
 from torch.utils.data import DataLoader
 from torchvision.transforms import Compose
 from torchvision.transforms import RandomRotation, RandomCrop
-from torchvision.transforms.functional import InterpolationMode
 from tqdm import tqdm
 import torch.nn.functional as F
+from typing import Tuple
+from torchvision import transforms
 
 
 from multiplex_model.data import DatasetFromTIFF, PanelBatchSampler, TestCrop
@@ -21,6 +22,66 @@ from multiplex_model.losses import nll_loss
 from multiplex_model.utils import ClampWithGrad, plot_reconstructs_with_uncertainty, get_scheduler_with_warmup
 from multiplex_model.modules import MultiplexAutoencoder
 from multiplex_model.run_utils import build_run_name_suffix, SLURM_JOB_ID
+
+import sys
+import os
+
+
+from src_from_rudy.utils import setup_seeds, setup_clearml, ChainDataLoader
+from src_from_rudy.augmentations import ArcsinhNormalize, MinMaxNormalize, ButterworthFilter, GlobalNormalize, SelectMarkers
+from src_from_rudy.config.autoencoder_cells import Config as CellsConfig
+from src_from_rudy.config.multiplex_vit_no_bottleneck_autoencoder import Config as TissuesConfig
+from src_from_rudy.constants import LOGDIR, IMC_PANEL2_DATA_DIR, PANEL_1_MARKER_NAMES, IMC_PANEL1_DATA_DIR, HALEY_GLIO, DANENBERG_BREAST_DIR, REQUIRED_IMG_SHAPES
+from src_from_rudy.datasets.imc_datasets import CellPatchesDataModule, WholeSlidesDataModule, ContrastiveTissuePatchesDataModule, TissuePatchesDataModule
+
+
+
+def _setup_data_loaders(data_module) -> Tuple[DataLoader, DataLoader]:
+    data_module.setup('train')
+    data_module.setup('test')
+    train_loader = data_module.train_dataloader()
+    test_loader = data_module.test_dataloader()
+    return train_loader, test_loader
+
+def _setup_data_loader(data_module) -> DataLoader:
+    data_module.setup('train')
+    train_loader = data_module.train_dataloader()
+    return train_loader
+
+def _get_marker_indices(markers):
+    marker_indices = []
+    for marker in markers:
+        marker_indices.append(PANEL_1_MARKER_NAMES.index(marker))
+    return marker_indices
+
+def _create_tissue_patches_data_module(data_dir: str, batch_size: int, image_size: int):
+    # patches_transform = transforms.Compose([
+    #     ArcsinhNormalize(),
+    #     MinMaxNormalize(),
+    #     ButterworthFilter(),
+
+    # ])
+    patches_transform = transforms.Compose([
+        # ArcsinhNormalize(),
+        # ButterworthFilter(),
+        # GlobalNormalize(),
+        # SelectMarkers(_get_marker_indices(TissuesConfig.SELECTED_MARKERS)),
+    ])
+    patches_data_module = TissuePatchesDataModule(
+        data_dir=data_dir,
+        batch_size=batch_size,
+        patch_size=image_size,
+        transform=patches_transform,
+        sample_frac=TissuesConfig.SAMPLE_FRAC,
+        img_paths_file=TissuesConfig.IMG_PATHS_FILE,
+        is_imc_dir=data_dir in [IMC_PANEL2_DATA_DIR, IMC_PANEL1_DATA_DIR],
+        need_to_merge_single_channel_images=data_dir in [HALEY_GLIO],
+        required_img_shape=REQUIRED_IMG_SHAPES[data_dir],
+    )
+    return patches_data_module
+
+
+
 
 def train_masked(
         model, 
@@ -47,14 +108,29 @@ def train_masked(
         os.makedirs(checkpoints_path, exist_ok=True)
         print(f'Created checkpoints directory at {checkpoints_path}')
 
+    # val_loss = test_masked(
+    #     model, 
+    #     val_dataloader, 
+    #     device, 
+    #     run, 
+    #     0, 
+    #     min_channels_frac=min_channels_frac,
+    #     marker_names_map=marker_names_map,
+    # )
+    # print(f'Validation loss: {val_loss:.4f}')
     for epoch in range(start_epoch, epochs):
         model.train()
-        for batch_idx, (img, channel_ids, panel_idx, img_path) in enumerate(tqdm(train_dataloader, desc=f'Epoch {epoch}')):
+        for batch_idx, batch in enumerate(tqdm(train_dataloader, desc=f'Epoch {epoch}')):
+            img = batch['image']
+            # crop image to first 99x99 pixels
+            # img = img[:, :, :97, :97]  # Assuming img is of shape [batch_size, num_channels, H, W]
+            img = img[:, :, 1:-2, 1:-2]
             # print(f'Processing batch {batch_idx} in epoch {epoch}...')
             # print(f'Batch size: {img.shape[0]}, Image shape: {img.shape}, Channel IDs shape: {channel_ids.shape}, Panel index: {panel_idx}, Image path: {img_path}')
             batch_size, num_channels, H, W = img.shape
             # trim channel_ids for debugging to 10 first channels
             # channel_ids = channel_ids[:, :10]
+            channel_ids = torch.arange(num_channels, dtype=torch.long).unsqueeze(0).expand(batch_size, -1)  # Shape: [batch_size, num_channels]
 
             # Randomly sample a subset of channels to keep
             min_channels = int(np.ceil(num_channels * min_channels_frac))
@@ -87,8 +163,9 @@ def train_masked(
 
             with autocast(device_type='cuda', dtype=torch.bfloat16):
                 # output = model(masked_img, active_channel_ids, channel_ids)['output']
-                # output = model(masked_img, active_channel_ids, channel_ids)['output'][:, :, 3:-4, 3:-4]
-                output = model(masked_img, active_channel_ids, active_channel_ids)['output'][:, :, 3:-4, 3:-4]
+                output = model(masked_img, active_channel_ids, channel_ids)['output'][:, :, 3:-4, 3:-4]
+                # output = model(masked_img, active_channel_ids, active_channel_ids)['output'][:, :, 3:-4, 3:-4]
+                # output = model(masked_img, active_channel_ids, active_channel_ids)[0][:, :, 3:-4, 3:-4]
                 # print(f"output shape: {output.shape}")
                 mi, logsigma = output.unbind(dim=-1)
                 mi = torch.sigmoid(mi)
@@ -97,10 +174,12 @@ def train_masked(
                 # Apply ClampWithGrad to logsigma for stability
                 # logsigma = ClampWithGrad.apply(logsigma, -15.0, 15.0)
                 logsigma = torch.tanh(logsigma) * 5.0  # Scale logsigma to a reasonable range
-                loss = nll_loss(masked_img, mi, logsigma)
+                loss = nll_loss(img, mi, logsigma)
                 print(loss.item())
 
                 # sanity check if loss is finite
+                # panel_idx = "nsclc-panel-1"  # Placeholder for panel index, can be modified based on your dataset
+                # img_path = train_dataloader.dataset.curr_img_path
                 if not torch.isfinite(loss):
                     print(f'Non-finite loss encountered at batch {batch_idx} in epoch {epoch}. Skipping batch.')
                     print(f'Dataset: {panel_idx}')
@@ -109,7 +188,6 @@ def train_masked(
                     assert False, "Non-finite loss encountered. Check the model and data."
 
             scaler.scale(loss / gradient_accumulation_steps).backward()
-            # scaler.scale(loss).backward()
 
             if (batch_idx+1) % gradient_accumulation_steps == 0:
                 scaler.unscale_(optimizer)
@@ -122,7 +200,7 @@ def train_masked(
                 run['train/lr'].append(scheduler.get_last_lr()[0])
                 run['train/µ'].append(mi.mean().item())
                 run['train/logvar'].append(logsigma.mean().item())
-                run['train/mae'].append(torch.abs(masked_img - mi).mean().item())
+                run['train/mae'].append(torch.abs(img - mi).mean().item())
         scheduler.step()
 
         val_loss = test_masked(
@@ -163,7 +241,7 @@ def test_masked(
         run, 
         epoch,
         marker_names_map,
-        num_plots=5, 
+        num_plots=10, 
         min_channels_frac=0.5
         ):
     model.eval()
@@ -173,9 +251,14 @@ def test_masked(
     plot_indices = set(plot_indices)
     rand_gen = torch.Generator().manual_seed(42)
     with torch.no_grad():
-        for idx, (img, channel_ids, panel_idx, img_path) in enumerate(tqdm(test_dataloader, desc=f'Testing epoch {epoch}')):
+        for idx, batch in enumerate(tqdm(test_dataloader, desc=f'Testing epoch {epoch}')):
+            img = batch['image']
+            # img = img[:, :, :97, :97]  # Crop image to first 97x97 pixels
+            img = img[:, :, 1:-2, 1:-2]
             batch_size, num_channels, H, W = img.shape
             min_channels = int(np.ceil(num_channels * min_channels_frac))
+
+            channel_ids = torch.arange(num_channels, dtype=torch.long).unsqueeze(0).expand(batch_size, -1)  # Shape: [batch_size, num_channels]
             
             num_sampled_channels = torch.randint(min_channels, num_channels, (1,), generator=rand_gen).item()
             channels_subset_idx = [
@@ -198,26 +281,26 @@ def test_masked(
             channel_ids = channel_ids.to(device)
             masked_img = masked_img.to(torch.float32)
             img = img.to(device)
-            
 
             # output = model(masked_img, active_channel_ids, channel_ids)['output']
-            # output = model(masked_img, active_channel_ids, channel_ids)['output'][:, :, 3:-4, 3:-4]  # Remove padding
-            output = model(masked_img, active_channel_ids, active_channel_ids)['output'][:, :, 3:-4, 3:-4]  # Remove padding
+            output = model(masked_img, active_channel_ids, channel_ids)['output'][:, :, 3:-4, 3:-4]  # Remove padding
+            # output = model(masked_img, active_channel_ids, active_channel_ids)['output'][:, :, 3:-4, 3:-4]  # Remove padding
+            # output = model(masked_img, active_channel_ids, active_channel_ids)[0][:, :, 3:-4, 3:-4]  # Remove padding
             mi, logsigma = output.unbind(dim=-1)
             mi = torch.sigmoid(mi)
   
-            loss = nll_loss(masked_img, mi, logsigma)
+            loss = nll_loss(img, mi, logsigma)
             running_loss += loss.item()
-            running_mae += torch.abs(masked_img - mi).mean().item()
+            running_mae += torch.abs(img - mi).mean().item()
 
             if idx in plot_indices:
                 uncertainty_img = torch.exp(logsigma)
-                # unactive_channels = [i for i in channel_ids[0] if i not in active_channel_ids[0]]
-                unactive_channels = []
+                unactive_channels = [i for i in channel_ids[0] if i not in active_channel_ids[0]]
+                # unactive_channels = []
                 masked_channels_names = '\n'.join([marker_names_map[i.item()] for i in unactive_channels])
 
                 reconstr_img = plot_reconstructs_with_uncertainty(
-                    masked_img,
+                    img,
                     mi,
                     uncertainty_img,
                     channel_ids,
@@ -225,6 +308,8 @@ def test_masked(
                     markers_names_map=marker_names_map,
                     scale_by_max=True
                 )
+                panel_idx = ["nsclc-panel-1"]  # Placeholder for panel index, can be modified based on your dataset
+                img_path = test_dataloader.dataset.curr_img_path
                 run['val/imgs'].append(
                     reconstr_img, 
                     description=f'Resuilting outputs (variance scaled by min-max)  (dataset {panel_idx[0]}, image {img_path[0]}, epoch {epoch})'
@@ -249,6 +334,10 @@ if __name__ == '__main__':
     with open("secrets/neptune.yaml", 'r') as f:
         secrets = yaml.load(f)
 
+
+    device = config['device']
+    print(f'Using device: {device}')
+    
     prefix = config.get("run_prefix", "").strip()         # empty by default
     suffix = build_run_name_suffix()                               # always unique
     run_name = f"{prefix}_{suffix}" if prefix else suffix
@@ -260,11 +349,8 @@ if __name__ == '__main__':
         tags=config['tags'],
     )
 
-    device = config['device']
-    print(f'Using device: {device}')
-
-    SIZE = config['input_image_size']
-    print(f"INPUT IMAGE SIZE: {SIZE}")
+    # SIZE = config['input_image_size']
+    # print(f"INPUT IMAGE SIZE: {SIZE}")
     BATCH_SIZE = config['batch_size']
     NUM_WORKERS = config['num_workers']
 
@@ -277,43 +363,6 @@ if __name__ == '__main__':
     TOKENIZER = {k: v for k, v in zip(MARKERS_SET, range(len(MARKERS_SET)))}
     INV_TOKENIZER = {v: k for k, v in TOKENIZER.items()}
 
-    train_transform = Compose([
-        RandomRotation(
-            180, 
-            interpolation=InterpolationMode.BILINEAR
-        ),
-        RandomCrop(SIZE),
-    ])
-
-    test_transform = TestCrop(SIZE[0])
-
-    train_dataset = DatasetFromTIFF(
-        panels_config=PANEL_CONFIG,
-        split='train',
-        marker_tokenizer=TOKENIZER,
-        transform=train_transform,
-        use_median_denoising=False,
-        use_butterworth_filter=True,
-        use_minmax_normalization=False,
-        use_clip_normalization=True
-    )
-
-    test_dataset = DatasetFromTIFF(
-        panels_config=PANEL_CONFIG,
-        split='test',
-        marker_tokenizer=TOKENIZER,
-        transform=test_transform,
-        use_median_denoising=False,
-        use_butterworth_filter=True,
-        use_minmax_normalization=False,
-        use_clip_normalization=True
-    )
-
-    train_batch_sampler = PanelBatchSampler(train_dataset, BATCH_SIZE)
-    test_batch_sampler = PanelBatchSampler(test_dataset, BATCH_SIZE, shuffle=False)
-
-    train_dataloader = DataLoader(train_dataset, batch_sampler=train_batch_sampler, num_workers=NUM_WORKERS)
-    test_dataloader = DataLoader(test_dataset, batch_sampler=test_batch_sampler, num_workers=NUM_WORKERS)
 
     model_config = {
         'num_channels': len(TOKENIZER),
@@ -322,31 +371,79 @@ if __name__ == '__main__':
         'decoder_config': config['decoder'],
     }
 
+
+    # start of new code 
+    oldConfig = TissuesConfig
+    oldConfig.BATCH_SIZE = config['batch_size']
+    print(oldConfig)
+
+    train_loaders = []
+    test_loaders = []
+    for data_dir in oldConfig.DATA_DIRS:
+        batch_size = oldConfig.BATCH_SIZE
+        if data_dir == IMC_PANEL2_DATA_DIR:
+            batch_size = int(batch_size / 1.1)
+        image_size = oldConfig.INPUT_OUTPUT_IMAGE_SHAPE[0]
+
+        if data_dir in [IMC_PANEL2_DATA_DIR, IMC_PANEL1_DATA_DIR]:
+            # slides_data_module = _create_whole_slides_data_module(data_dir, batch_size, image_size)
+            tissues_data_module = _create_tissue_patches_data_module(data_dir, batch_size, image_size)
+            # slides_train_loader, slides_test_loader = _setup_data_loaders(slides_data_module)
+            tissues_train_loader, tissues_test_loader = _setup_data_loaders(tissues_data_module)
+            # train_loaders += [slides_train_loader, tissues_train_loader]
+            # test_loaders += [slides_test_loader, tissues_test_loader]
+            train_loaders += [tissues_train_loader]
+            test_loaders += [tissues_test_loader]
+        else:
+            tissues_data_module = _create_tissue_patches_data_module(data_dir, batch_size, image_size)
+            tissues_train_loader = _setup_data_loader(tissues_data_module)
+            train_loaders += [tissues_train_loader]
+
+    train_dataloader = train_loaders[0]
+    test_dataloader = test_loaders[0]
+    print(f'Training on {len(train_dataloader.dataset)} training samples and {len(test_dataloader.dataset)} test samples')
+    # print(f'Batch size: {BATCH_SIZE}, Number of workers: {NUM_WORKERS}')
+
+    # end of new code
+
     if config["model_type"] == "EquivariantConvnext":
         from multiplex_model.equivariant_modules import EquivariantMultiplexAutoencoder
         model = EquivariantMultiplexAutoencoder(**model_config).to(device)
+
     elif config["model_type"] == "Convnext":
         model = MultiplexAutoencoder(**model_config).to(device)
 
-    print(f'Model created with config: {model_config}')
+    # from src_from_rudy.models.multiplexvit_no_bottleneck_autoencoder_escnn import EscnnMultiplexVitNoBottleneckAutoencoderModule
+    # autoencoder_module = EscnnMultiplexVitNoBottleneckAutoencoderModule(
+    #     image_size=oldConfig.INPUT_OUTPUT_IMAGE_SHAPE[0],
+    #     channels=oldConfig.CHANNELS,
+    #     hidden_size=oldConfig.HIDDEN_SIZE,
+    #     lr=oldConfig.LR,
+    #     debug_image_log_interval=oldConfig.DEBUG_IMAGE_LOG_INTERVAL,
+    #     loss_function=oldConfig.LOSS_FUNCTION,
+    #     config=config
+    # )
+    # model = autoencoder_module.autoencoder
+
+    # print(f'Model created with config: {model_config}')
     print(f'Model has {sum(p.numel() for p in model.parameters() if p.requires_grad)} trainable parameters')
     print(f'Model: {model}')
-    print(f'Training on {len(train_dataloader.dataset)} training samples and {len(test_dataloader.dataset)} test samples')
-    print(f'Batch size: {BATCH_SIZE}, Number of workers: {NUM_WORKERS}')
 
 
     lr = config['lr']
     final_lr = config['final_lr']
-    start_lr = config.get('start_lr', None)
     weight_decay = config['weight_decay']
     gradient_accumulation_steps = config['gradient_accumulation_steps']
     epochs = config['epochs']
     num_warmup_steps = config['num_warmup_steps']
-    # num_annealing_steps = len(train_dataloader) * epochs // gradient_accumulation_steps - num_warmup_steps
-    num_annealing_steps = config['num_annealing_steps']
+    num_annealing_steps = config["num_annealing_steps"] #len(train_dataloader) * epochs // gradient_accumulation_steps - num_warmup_steps
+    
+    # steps_per_epoch = len(train_dataloader) // gradient_accumulation_steps
+    # num_warmup_steps *= steps_per_epoch
+    # num_annealing_steps *= steps_per_epoch
 
     optimizer = optim.AdamW(model.parameters(), lr=lr, weight_decay=weight_decay)
-    scheduler = get_scheduler_with_warmup(optimizer, num_warmup_steps, num_annealing_steps, final_lr=final_lr, type='cosine', start_lr=start_lr, lr=lr)
+    scheduler = get_scheduler_with_warmup(optimizer, num_warmup_steps, num_annealing_steps, final_lr=final_lr, type='cosine')
 
     if 'from_checkpoint' in config and config['from_checkpoint']:
         print(f'Loading model from checkpoint: {config["from_checkpoint"]}')
@@ -371,7 +468,7 @@ if __name__ == '__main__':
         "epochs": epochs,
         "num_warmup_steps": num_warmup_steps,
         "num_annealing_steps": num_annealing_steps,
-        "model_config": stringify_unsupported(model_config),
+        # "model_config": stringify_unsupported(model_config),
         "from_checkpoint": config.get('from_checkpoint', None),
     }
 

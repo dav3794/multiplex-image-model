@@ -17,16 +17,16 @@ decoder:
 # Data configuration
 panel_config: configs/all_panels_config.yaml
 tokenizer_config: configs/all_markers_tokenizer.yaml
-input_image_size: [112, 112]
+input_image_size: [113, 113]
 num_workers: 8
-batch_size: 2
+batch_size: 4
 
 # Training configuration
 device: cuda:0
 lr: 5e-4
 final_lr: 1e-6
 weight_decay: 0.0001
-gradient_accumulation_steps: 4
+gradient_accumulation_steps: 1
 epochs: 200
 num_warmup_steps: 200
 min_channels_frac: 0.5

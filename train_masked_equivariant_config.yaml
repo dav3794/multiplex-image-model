@@ -22,23 +22,26 @@ decoder:
 panel_config: configs/all_panels_config.yaml
 tokenizer_config: configs/all_markers_tokenizer.yaml
 input_image_size: [113, 113]
-num_workers: 0
-batch_size: 2
+num_workers: 4
+batch_size: 4
 
 # Training configuration
-device: cuda:0
-lr: 5e-4
+device: cuda:3
+lr: 1.75e-5
 final_lr: 1e-6
+start_lr: 2e-6
 weight_decay: 0.0001
-gradient_accumulation_steps: 4
-epochs: 24
-num_warmup_steps: 2000 
+gradient_accumulation_steps: 2
+epochs: 2000
+num_warmup_steps: 10
+num_annealing_steps: 200
 min_channels_frac: 0.5
+
 from_checkpoint: null
 checkpoints_dir: checkpoints
 save_checkpoint_freq: 50
 
 # Neptune logging configuration
-tags: ['ConvNext', 'panel-1 data', 'Gaussian NLL', 'Steerable', 'escnn', 'real tanh scaling', 'no-impainting', 'global_normalize', 'output-trim', 'only-dataset-markers', 'old_loader']
+tags: ['ConvNext', 'panel-1 data', 'Gaussian NLL', 'Steerable', 'escnn', 'real tanh scaling', 'no-impainting', 'global_normalize', 'output-trim', 'only-dataset-markers', 'old_loader', 'no-clipping', 'fixed-all-time-warmup']
 run_prefix: 'EquivariantConvnext'
 model_type: "EquivariantConvnext"
