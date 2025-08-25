@@ -9,14 +9,14 @@ superkernel:
 encoder:
     # layers_blocks: [2, 2, 2]
     layers_blocks: [1, 1, 1]
-    embedding_dims: [192, 384, 768]
+    embedding_dims: [192, 384, 512]
     # embedding_dims: [10, 20, 40]
     # embedding_dims: [100, 200, 400]
     maximum_frequency: 1
 
 decoder:
   decoded_embed_dim: 512
-  num_blocks: 1
+  num_blocks: 2
 
 # Data configuration
 panel_config: configs/all_panels_config.yaml
@@ -26,22 +26,22 @@ num_workers: 4
 batch_size: 4
 
 # Training configuration
-device: cuda:3
-lr: 1.75e-5
+device: cuda:0
+lr: 2e-4
 final_lr: 1e-6
 start_lr: 2e-6
 weight_decay: 0.0001
-gradient_accumulation_steps: 2
+gradient_accumulation_steps: 1
 epochs: 2000
-num_warmup_steps: 10
+num_warmup_steps: 200
 num_annealing_steps: 200
 min_channels_frac: 0.5
 
 from_checkpoint: null
 checkpoints_dir: checkpoints
-save_checkpoint_freq: 50
+save_checkpoint_freq: 700
 
 # Neptune logging configuration
-tags: ['ConvNext', 'panel-1 data', 'Gaussian NLL', 'Steerable', 'escnn', 'real tanh scaling', 'no-impainting', 'global_normalize', 'output-trim', 'only-dataset-markers', 'old_loader', 'no-clipping', 'fixed-all-time-warmup']
+tags: ['ConvNext', 'panel-1 data', 'Gaussian NLL', 'Steerable', 'escnn', 'real tanh scaling', 'no-impainting', 'real-global_normalize', 'output-trim', 'only-dataset-markers', 'old_loader', 'no-clipping', 'fixed-all-time-warmup']
 run_prefix: 'EquivariantConvnext'
 model_type: "EquivariantConvnext"
