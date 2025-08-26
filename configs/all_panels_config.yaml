@@ -326,7 +326,7 @@ markers:
   - CD163
   - CD20
   - CD204
-  - MX1
+  - CD206
   - CD27
   - CD3
   - CD303
@@ -353,6 +353,7 @@ markers:
   - Ki67
   - LDHA
   - MPO
+  - MX1
   - NKX6-1
   - PD1
   - PDX1
