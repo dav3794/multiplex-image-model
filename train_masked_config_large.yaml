@@ -1,0 +1,40 @@
+superkernel:
+  embedding_dim: 128
+  num_layers: 0
+  num_heads: null
+  layer_type: linear
+  kernel_size: null
+  mlp_ratio: null
+
+encoder:
+    layers_blocks: [3, 6, 27]
+    embedding_dims: [256, 512, 1024]
+
+decoder:
+  decoded_embed_dim: 512
+  num_blocks: 1
+
+# Data configuration
+panel_config: configs/all_panels_config.yaml
+tokenizer_config: configs/all_markers_tokenizer.yaml
+input_image_size: [112, 112]
+num_workers: 8
+batch_size: 16
+
+# Training configuration
+device: cuda
+lr: 5e-4
+final_lr: 1e-6
+weight_decay: 0.0001
+gradient_accumulation_steps: 1
+epochs: 50
+num_warmup_steps: 15000
+min_channels_frac: 0.5
+from_checkpoint: null
+checkpoints_dir: checkpoints
+save_checkpoint_freq: 25
+
+# Neptune logging configuration
+tags: ['ConvNext', 'SZARY -- ALL DATA 20k', 'Gaussian NLL', 'large']
+neptune_project: 'dav3794/uncertian-multiplex'
+neptune_api_token: 'eyJhcGlfYWRkcmVzcyI6Imh0dHBzOi8vYXBwLm5lcHR1bmUuYWkiLCJhcGlfdXJsIjoiaHR0cHM6Ly9hcHAubmVwdHVuZS5haSIsImFwaV9rZXkiOiI5MGM3N2I1Ny0zNzFjLTRiMjYtYTI1NS0zZWY5OTRkNjJiOGMifQ=='

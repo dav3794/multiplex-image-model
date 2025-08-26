@@ -1,15 +1,19 @@
 paths:
-  train: /home/duchal/immuvis_all2/train
-  test: /home/duchal/immuvis_all2/test
-
+  train: /raid_encrypted/immucan/immuvis_split/train
+  test: /raid_encrypted/immucan/immuvis_split/test
 datasets:
 - ajaib
 - bc2
 - bengsch
 - bowen-lynch
-  # - cords-fibro
+- cho_2025
+- cords
+- cords-fibro
 - damond-lung
 - danenberg
+- ehret_2025_p1
+- ehret_2025_p2
+- einhaus_2025
 - haley_glio
 - hn
 - hoch-protein
@@ -20,10 +24,59 @@ datasets:
 - nsclc2-panel1
 - nsclc2-panel2
 - ohara
+- steenbuck-immune
+- steenbuck-islets
 - susman
 - xu
-
 markers:
+  steenbuck-islets:
+  - ADAR1
+  - AMY1A
+  - ARX
+  - ATPIF1
+  - B2M
+  - Biotin
+  - C-peptide
+  - C3
+  - Carbonic Anhydrase
+  - Caveolin-1
+  - CD155
+  - CD163
+  - CD3
+  - CD9
+  - CFTR
+  - CHGA
+  - CK19
+  - DNA1
+  - DNA2
+  - Ecad
+  - ERN1
+  - FOXA2
+  - GCG
+  - GHRL
+  - Histone H3
+  - HLA-ABC
+  - IAPP
+  - Insulin
+  - Ki67
+  - MX1
+  - NFkb
+  - NKX2.2
+  - NKX6-1
+  - Pax6
+  - PCSK1
+  - PCSK2
+  - PDL1
+  - PDX1
+  - PPY
+  - Proglucagon
+  - Proinsulin
+  - Somatostatin
+  - SYP
+  - TXNIP
+  - Vimentin
+  - WFS1
+  - XBP1
   kucukkose:
   - AKT
   - beta-Catenin
@@ -95,12 +148,14 @@ markers:
   - pRB
   - PTPRN
   - SMA
-  - SST
   - SYP
   ajaib:
   - Annexin A2
+  - ANXA1
   - BCAN
+  - CD3
   - CD31
+  - CD45
   - CD56
   - CD8a
   - CHI3L1
@@ -110,6 +165,7 @@ markers:
   - EZH2
   - GFAP
   - HIF1a
+  - HOPX
   - IBA1
   - JARID2-C
   - JARID2-N
@@ -119,6 +175,7 @@ markers:
   - NKp46
   - Olig1
   - P2RY12
+  - SCD5
   - SLC1A3/EAAT1
   - SMA
   - SNAI1
@@ -127,6 +184,184 @@ markers:
   - TGFB
   - TMEM119
   - TNC
+  ehret_2025_p1:
+  - Arg1
+  - beta-Catenin
+  - c-Caspase3c-PARP
+  - Carbonic Anhydrase
+  - Caveolin-1
+  - CD15
+  - CD163
+  - CD20
+  - CD3
+  - CD31
+  - CD4
+  - CD45
+  - CD56
+  - CD68
+  - CD8a
+  - CDX2
+  - CEACAM5
+  - CK20
+  - CK8-18
+  - DNA1
+  - DNA2
+  - EGFR
+  - FOXP3
+  - FSP1
+  - GATA3
+  - GPA33
+  - GrzB
+  - HER2 (3B5)
+  - HER3
+  - HLA-ABC
+  - HLADR
+  - Ki67
+  - LAG3
+  - p53
+  - panCK
+  - PD1
+  - PDL1
+  - Podoplanin
+  - PTEN
+  - SMA
+  - TBET
+  - Vimentin
+  ehret_2025_p2:
+  - Arg1
+  - c-Caspase3c-PARP
+  - Carbonic Anhydrase
+  - Caveolin-1
+  - CD11c
+  - CD137
+  - CD15
+  - CD163
+  - CD20
+  - CD3
+  - CD31
+  - CD38
+  - CD4
+  - CD40
+  - CD45
+  - CD56
+  - CD68
+  - CD7
+  - CD73
+  - CD79A
+  - CD8a
+  - CTLA-4
+  - DNA1
+  - DNA2
+  - FOXP3
+  - FSP1
+  - GrzB
+  - HLA-ABC
+  - HLADR
+  - Ido1
+  - Ki67
+  - LAG3
+  - panCK
+  - PD1
+  - PDL1
+  - Podoplanin
+  - SMA
+  - TBET
+  - TCF1/7
+  - Tim3
+  - TMEM173
+  - TOX2
+  - Vimentin
+  - VISTA
+  cho_2025:
+  - Arg1
+  - CD134
+  - CD137
+  - CD15
+  - CD163
+  - CD20
+  - CD206
+  - CD3
+  - CD4
+  - CD45RA
+  - CD45RO
+  - CD47
+  - CD57
+  - CD68
+  - CD73
+  - CD74
+  - CD86
+  - CD8a
+  - Collagen Type I
+  - DCSIGN
+  - DNA1
+  - DNA2
+  - FOXP3
+  - GrzB
+  - HLADR
+  - ICOS
+  - Ki67
+  - LAG3
+  - panCK
+  - PD1
+  - PDL1
+  - PM2
+  - PM3
+  - PM4
+  - Podoplanin
+  - pSTAT3
+  - PTPN22
+  - TIGIT
+  - Tim3
+  - TOX
+  - VISTA
+  steenbuck-immune:
+  - Arg1
+  - ATP5A
+  - Caveolin-1
+  - CD103
+  - CD11b
+  - CD11c
+  - CD15
+  - CD16
+  - CD163
+  - CD20
+  - CD204
+  - MX1
+  - CD27
+  - CD3
+  - CD303
+  - CD4
+  - CD45RA
+  - CD45RO
+  - CD54
+  - CD56
+  - CD57
+  - CD66b
+  - CD7
+  - CD73
+  - CD8a
+  - Cirate Synthase
+  - DNA1
+  - DNA2
+  - FOXP3
+  - GCG
+  - GrzB
+  - Hexokinase I
+  - Histone H3
+  - HLADR
+  - Insulin
+  - Ki67
+  - LDHA
+  - MPO
+  - NKX6-1
+  - PD1
+  - PDX1
+  - SMA
+  - Somatostatin
+  - SYP
+  - Tim3
+  - TMEM173
+  - Vimentin
   nsclc2-panel2:
   - Arg1
   - Bcl2
@@ -164,6 +399,7 @@ markers:
   - Ki67
   - LAMP3
   - MMP9
+  - NKG2A
   - p53
   - panCK
   - PD1
@@ -290,47 +526,6 @@ markers:
   - PDL1
   - Tim3
   - VISTA
-  bc2:
-  - B2M
-  - Carbonic Anhydrase
-  - CD11c
-  - CD14
-  - CD15
-  - CD16
-  - CD163
-  - CD20
-  - CD206
-  - CD27
-  - CD3
-  - CD303
-  - CD33
-  - CD38
-  - CD4
-  - CD40
-  - CD45RA
-  - CD45RO
-  - CD68
-  - CD7
-  - CD8a
-  - cl.PARP
-  - DNA1
-  - DNA2
-  - Ecad
-  - FOXP3
-  - GrzB
-  - Histone H3
-  - HLADR
-  - ICOS
-  - Ido1
-  - Ki67
-  - LAG3
-  - MPO
-  - PD1
-  - PDGFRb
-  - PDL1
-  - SMA
-  - TCF7
-  - VISTA
   hn:
   - B2M
   - Carbonic Anhydrase
@@ -373,6 +568,47 @@ markers:
   - TCF7
   - VISTA
   nsclc2-panel1:
+  - B2M
+  - Carbonic Anhydrase
+  - CD11c
+  - CD14
+  - CD15
+  - CD16
+  - CD163
+  - CD20
+  - CD206
+  - CD27
+  - CD3
+  - CD303
+  - CD33
+  - CD38
+  - CD4
+  - CD40
+  - CD45RA
+  - CD45RO
+  - CD68
+  - CD7
+  - CD8a
+  - cl.PARP
+  - DNA1
+  - DNA2
+  - Ecad
+  - FOXP3
+  - GrzB
+  - Histone H3
+  - HLADR
+  - ICOS
+  - Ido1
+  - Ki67
+  - LAG3
+  - MPO
+  - PD1
+  - PDGFRb
+  - PDL1
+  - SMA
+  - TCF7
+  - VISTA
+  bc2:
   - B2M
   - Carbonic Anhydrase
   - CD11c
@@ -530,6 +766,86 @@ markers:
   - PP
   - pS6
   - Somatostatin
+  jackson-basel:
+  - beta-Catenin
+  - c-Caspase3c-PARP
+  - c-Myc
+  - Carbonic Anhydrase
+  - CD20
+  - CD3
+  - CD44
+  - CD45
+  - CD68
+  - CK14
+  - CK19
+  - CK5
+  - CK7
+  - CK8-18
+  - DNA1
+  - DNA2
+  - Ecad
+  - EGFR
+  - EPCAM
+  - ER
+  - Fibronectin
+  - GATA3
+  - HER2 (3B5)
+  - Histone H3
+  - Histone H3 - p
+  - Histone H3 - t
+  - Ki67
+  - mTOR
+  - p53
+  - panCK
+  - pERK
+  - PR
+  - pS6
+  - Slug
+  - SMA
+  - Sox9
+  - Twist
+  - Vimentin
+  - vWF
+  jackson-zurich:
+  - beta-Catenin
+  - c-Caspase3c-PARP
+  - c-Myc
+  - Carbonic Anhydrase
+  - CD20
+  - CD3
+  - CD44
+  - CD45
+  - CD68
+  - CK14
+  - CK19
+  - CK5
+  - CK7
+  - CK8-18
+  - DNA1
+  - DNA2
+  - Ecad
+  - EGFR
+  - EPCAM
+  - ER
+  - Fibronectin
+  - GATA3
+  - HER2 (3B5)
+  - Histone H3
+  - Histone H3 - p
+  - Histone H3 - t
+  - Ki67
+  - mTOR
+  - p53
+  - panCK
+  - pERK
+  - PR
+  - pS6
+  - Slug
+  - SMA
+  - Sox9
+  - Twist
+  - Vimentin
+  - vWF
   hoch-protein:
   - beta-Catenin
   - Caveolin-1
@@ -579,7 +895,7 @@ markers:
   - Vimentin
   bengsch:
   - beta-Catenin
-  - CD109
+  - CD103
   - CD15
   - CD163
   - CD20
@@ -620,82 +936,133 @@ markers:
   - TIGIT
   - Tim3
   - TOX
-  jackson-zurich:
-  - c-Myc
+  cords:
+  - Cadherin-11
   - Carbonic Anhydrase
+  - Caveolin-1
+  - CCL21
+  - CD10
+  - CD146
+  - CD15
   - CD20
+  - CD248
   - CD3
-  - CD44
+  - CD31-vWF
+  - CD34
+  - CD4
   - CD45
   - CD68
-  - CK14
-  - CK19
-  - CK5
-  - CK7
-  - CK8-18
-  - cl.PARP
+  - CD73
+  - CD8a
+  - CXCL12
+  - DNA1
+  - DNA2
+  - FAP
+  - FOXP3
+  - FSP1
+  - Histone H3
+  - HLADR
+  - Ido1
+  - K-Cadherin
+  - Ki67
+  - LYVE1
+  - MMP11
+  - MMP9
+  - MPO
+  - p75
+  - panCK
+  - PD1
+  - PDGFRb
+  - PNAd
+  - Podoplanin
+  - SMA
+  - TCF1/7
+  - VCAM1
+  - Vimentin
+  cords-fibro:
+  - Cadherin-11
+  - Carbonic Anhydrase
+  - Caveolin-1
+  - CCL21
+  - CD10
+  - CD146
+  - CD15
+  - CD20
+  - CD248
+  - CD3
+  - CD31-vWF
+  - CD34
+  - CD4
+  - CD45
+  - CD68
+  - CD73
+  - CD8a
+  - CXCL12
+  - DNA1
+  - DNA2
+  - FAP
+  - FOXP3
+  - FSP1
+  - Histone H3
+  - HLADR
+  - Ido1
+  - K-Cadherin
+  - Ki67
+  - LYVE1
+  - MMP11
+  - MMP9
+  - MPO
+  - p75
+  - panCK
+  - PD1
+  - PDGFRb
+  - PNAd
+  - Podoplanin
+  - SMA
+  - TCF1/7
+  - VCAM1
+  - Vimentin
+  einhaus_2025:
+  - CD11b
+  - CD11c
+  - CD14
+  - CD15
+  - CD16
+  - CD163
+  - CD20
+  - CD206
+  - CD209
+  - CD3
+  - CD31
+  - CD36
+  - CD4
+  - CD44
+  - CD45
+  - CD45RA
+  - CD56
+  - CD68
+  - CD8a
+  - Collagen Type I
   - DNA1
   - DNA2
   - Ecad
-  - EGFR
-  - ER
-  - Fibronectin
-  - GATA3
-  - HER2 (3B5)
+  - FOXP3
+  - GrzB
   - Histone H3
-  - Histone H3 - p
-  - Histone H3 - t
+  - HLADR
   - Ki67
-  - mTOR
-  - p53
   - panCK
+  - pCREB
   - pERK
-  - PR
-  - S6
-  - Slug
+  - pMAPKAPK2
+  - pNFkB
+  - pp38
+  - pS6
+  - pSTAT1
+  - pSTAT3
   - SMA
-  - Sox9
-  - Twist
+  - VEGF
   - Vimentin
-  - vWF
-  jackson-basel:
-  - c-Myc
-  - Carbonic Anhydrase
-  - CD20
-  - CD3
-  - CD44
-  - CD45
-  - CD68
-  - CK14
-  - CK19
-  - CK5
-  - CK7
-  - CK8-18
-  - cl.PARP
-  - DNA1
-  - DNA2
-  - Ecad
-  - EGFR
-  - ER
-  - Fibronectin
-  - GATA3
-  - HER2 (3B5)
-  - Histone H3
-  - Histone H3 - p
-  - Histone H3 - t
-  - Ki67
-  - mTOR
-  - p53
-  - panCK
-  - pERK
-  - PR
-  - S6
-  - Slug
-  - SMA
-  - Sox9
-  - Twist
-  - Vimentin
-  - vWF
   ohara:
   - CD11b
   - CD11c
