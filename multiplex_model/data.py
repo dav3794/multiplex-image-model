@@ -86,7 +86,7 @@ class DatasetFromTIFF(Dataset):
         return torch.tensor(scaled_img)
     
     @staticmethod
-    def norm_clip(img, upper_bound=3):
+    def norm_clip(img, upper_bound=5):
         """Normalize image channels to [0, 1] range using clipping."""
         img = np.clip(img, 0, upper_bound) / upper_bound
         return torch.tensor(img)
