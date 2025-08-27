@@ -35,6 +35,6 @@ checkpoints_dir: checkpoints
 save_checkpoint_freq: 25
 
 # Neptune logging configuration
-tags: ['ConvNext', 'SZARY -- ALL DATA 20k', 'Gaussian NLL', 'base']
-neptune_project: 'dav3794/uncertian-multiplex'
-neptune_api_token: 'eyJhcGlfYWRkcmVzcyI6Imh0dHBzOi8vYXBwLm5lcHR1bmUuYWkiLCJhcGlfdXJsIjoiaHR0cHM6Ly9hcHAubmVwdHVuZS5haSIsImFwaV9rZXkiOiI5MGM3N2I1Ny0zNzFjLTRiMjYtYTI1NS0zZWY5OTRkNjJiOGMifQ=='
+tags: [...]
+neptune_project: ...
+neptune_api_token: ...
