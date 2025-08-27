@@ -353,7 +353,6 @@ markers:
   - Ki67
   - LDHA
   - MPO
-  - MX1
   - NKX6-1
   - PD1
   - PDX1
@@ -1054,6 +1053,7 @@ markers:
   - Ki67
   - panCK
   - pCREB
+  - PCSK2
   - pERK
   - pMAPKAPK2
   - pNFkB
