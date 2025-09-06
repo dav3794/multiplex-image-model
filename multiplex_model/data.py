@@ -20,19 +20,29 @@ class DatasetFromTIFF(Dataset):
             transform=None,
             use_median_denoising: bool = False,
             use_butterworth_filter: bool = True,
-            use_minmax_normalization: bool = True,
-            use_clip_normalization: bool = False,
+            use_minmax_normalization: bool = False,
+            use_clip_normalization: bool = True,
+            global_upper_bound: float = 5.0,
         ):
+        """Dataset for loading TIFF images from multiple panels.
+
+        Args:
+            panels_config (Dict): Configuration dictionary for panels.
+            split (str): Name of the data split (e.g., 'train', 'val', 'test').
+            marker_tokenizer (Dict[str, int]): Tokenizer for marker names.
+            transform (_type_, optional): Transform to be applied to the images. Defaults to None.
+            use_median_denoising (bool, optional): Whether to use median denoising. Defaults to False.
+            use_butterworth_filter (bool, optional): Whether to use Butterworth filter. Defaults to True.
+            use_minmax_normalization (bool, optional): Whether to use min-max normalization. Defaults to True.
+            use_clip_normalization (bool, optional): Whether to use clipping normalization. Defaults to False.
+            global_upper_bound (float, optional): Global upper bound for clipping normalization if `clip_limits` 
+                is not provided in config. Defaults to 5.0.
+        """
         assert 'paths' in panels_config, "Panels config must have 'paths' attribute with paths of splits of the data."
         assert split in panels_config['paths'], f"Panels config must have '{split}' attribute with data path."
         assert 'datasets' in panels_config, "Panels config must have 'datasets' attribute with subdirectories."
         assert 'markers' in panels_config, "Panels config must have 'markers' attribute with channel IDs."
 
-        
-        # self.active_channels = {
-        #     dataset: np.array(list(panels_config['markers'][dataset].keys()))
-        #     for dataset in panels_config['datasets']
-        # }
         self.channel_ids = {
             dataset: torch.tensor([
                 marker_tokenizer[marker]
@@ -46,6 +56,9 @@ class DatasetFromTIFF(Dataset):
         for dataset in panels_config['datasets']:
             tiffs = glob(os.path.join(img_path, dataset, 'imgs', '*.tiff'))
             self.imgs.extend([(tiff, dataset) for tiff in tiffs])
+
+        self.clip_limits = panels_config.get('clip_limits', {})
+        self.global_upper_bound = global_upper_bound
 
         self.transform = transform
         self.use_denoising = use_median_denoising
@@ -85,17 +98,11 @@ class DatasetFromTIFF(Dataset):
         scaled_img = np.clip(scaled_img, 0, 1)
         return torch.tensor(scaled_img)
     
-    @staticmethod
-    def norm_clip(img, upper_bound=5):
+    def norm_clip(self, img, dataset):
         """Normalize image channels to [0, 1] range using clipping."""
+        upper_bound = self.clip_limits.get(dataset, self.global_upper_bound)
         img = np.clip(img, 0, upper_bound) / upper_bound
         return torch.tensor(img)
-    
-    # def strip_channels(self, img, dataset):
-    #     """Strip absent channels from the image based on the dataset config."""
-    #     active_channels = self.active_channels[dataset]
-    #     stripped_img = img[active_channels]
-    #     return stripped_img
 
     def __len__(self):
         return len(self.imgs)
@@ -105,7 +112,6 @@ class DatasetFromTIFF(Dataset):
         channel_ids = self.channel_ids[dataset]
 
         img = tifffile.imread(img_path)
-        # img = self.strip_channels(img, dataset)
         img = self.preprocess(img)
 
         if self.transform:
@@ -118,9 +124,9 @@ class DatasetFromTIFF(Dataset):
             img = self.denoise(img)
 
         if self.use_clip_normalization:
-            img = self.norm_clip(img)
+            img = self.norm_clip(img, dataset)
 
-        if self.use_minmax_normalization:
+        elif self.use_minmax_normalization:
             img = self.norm_minmax(img)
         
         return img, channel_ids, dataset, img_path

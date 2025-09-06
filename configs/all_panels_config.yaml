@@ -28,6 +28,33 @@ datasets:
 - steenbuck-islets
 - susman
 - xu
+clip_limits:
+  ajaib: 4.9
+  bc2: 3.7
+  bengsch: 0.1
+  bowen-lynch: 3.2
+  cho_2025: 3.9
+  cords: 4.0
+  cords-fibro: 2.3
+  damond-lung: 2.1
+  danenberg: 2.9
+  ehret_2025_p1: 3.4
+  ehret_2025_p2: 2.4
+  einhaus_2025: 2.4
+  haley_glio: 2.5
+  hn: 3.4
+  hoch-protein: 3.8
+  hoch-rna: 3.5
+  jackson-basel: 2.3
+  jackson-zurich: 2.4
+  kucukkose: 2.8
+  nsclc2-panel1: 3.1
+  nsclc2-panel2: 2.7
+  ohara: 3.6
+  steenbuck-immune: 1.9
+  steenbuck-islets: 2.6
+  susman: 4.0
+  xu: 2.3
 markers:
   steenbuck-islets:
   - ADAR1
