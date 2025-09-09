@@ -9,7 +9,7 @@ superkernel:
 encoder:
     # layers_blocks: [2, 2, 2]
     layers_blocks: [1, 1, 1]
-    embedding_dims: [192, 384, 768]
+    embedding_dims: [192, 384, 512]
     # embedding_dims: [10, 20, 40]
     # embedding_dims: [100, 200, 400]
     maximum_frequency: 1

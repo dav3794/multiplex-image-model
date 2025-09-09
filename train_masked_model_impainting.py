@@ -48,7 +48,7 @@ def train_masked(
 
     for epoch in range(start_epoch, epochs):
         model.train()
-        for batch_idx, (img, channel_ids, panel_idx, img_path) in enumerate(tqdm(train_dataloader, desc=f'Epoch {epoch}')):
+        for batch_idx, (img, channel_ids, panel_idx, img_path) in enumerate(train_dataloader):
             # print(f'Processing batch {batch_idx} in epoch {epoch}...')
             # print(f'Batch size: {img.shape[0]}, Image shape: {img.shape}, Channel IDs shape: {channel_ids.shape}, Panel index: {panel_idx}, Image path: {img_path}')
             batch_size, num_channels, H, W = img.shape
@@ -79,7 +79,7 @@ def train_masked(
 
 
             img = img.to(device)
-            print(f"img shape {img.shape}")
+            # print(f"img shape {img.shape}")
             channel_ids = channel_ids.to(device)
             # print(f"Batch {batch_idx} - Channel IDs: {channel_ids.shape}  Active channel IDs: {active_channel_ids.shape}, Masked image shape: {masked_img.shape}, Image shape: {img.shape}")
             masked_img = masked_img.to(torch.float32)
@@ -91,13 +91,13 @@ def train_masked(
                 # print(f"output shape: {output.shape}")
                 mi, logsigma = output.unbind(dim=-1)
                 mi = torch.sigmoid(mi)
-                print(f'Mean of mi: {mi.mean().item()}, Mean of logsigma: {logsigma.mean().item()}')
+                # print(f'Mean of mi: {mi.mean().item()}, Mean of logsigma: {logsigma.mean().item()}')
 
                 # Apply ClampWithGrad to logsigma for stability
                 # logsigma = ClampWithGrad.apply(logsigma, -15.0, 15.0)
                 logsigma = torch.tanh(logsigma) * 5.0  # Scale logsigma to a reasonable range
                 loss = nll_loss(img, mi, logsigma)
-                print(loss.item())
+                # print(loss.item())
 
                 # sanity check if loss is finite
                 if not torch.isfinite(loss):
@@ -120,7 +120,7 @@ def train_masked(
                 run['train/lr'].append(scheduler.get_last_lr()[0])
                 run['train/µ'].append(mi.mean().item())
                 run['train/logvar'].append(logsigma.mean().item())
-                run['train/mae'].append(torch.abs(masked_img - mi).mean().item())
+                run['train/mae'].append(torch.abs(img - mi).mean().item())
         # scheduler.step()
 
         val_loss = test_masked(
@@ -132,7 +132,7 @@ def train_masked(
             min_channels_frac=min_channels_frac,
             marker_names_map=marker_names_map,
         )
-        print(f'Validation loss: {val_loss:.4f}')
+        # print(f'Validation loss: {val_loss:.4f}')
 
         if (epoch + 1) % save_checkpoint_every == 0:
             checkpoint = {
@@ -171,7 +171,7 @@ def test_masked(
     plot_indices = set(plot_indices)
     rand_gen = torch.Generator().manual_seed(42)
     with torch.no_grad():
-        for idx, (img, channel_ids, panel_idx, img_path) in enumerate(tqdm(test_dataloader, desc=f'Testing epoch {epoch}')):
+        for idx, (img, channel_ids, panel_idx, img_path) in enumerate(test_dataloader):
             batch_size, num_channels, H, W = img.shape
             min_channels = int(np.ceil(num_channels * min_channels_frac))
             
@@ -215,7 +215,7 @@ def test_masked(
                 masked_channels_names = '\n'.join([marker_names_map[i.item()] for i in unactive_channels])
 
                 reconstr_img = plot_reconstructs_with_uncertainty(
-                    masked_img,
+                    img,
                     mi,
                     uncertainty_img,
                     channel_ids,
@@ -268,15 +268,16 @@ if __name__ == '__main__':
 
     PANEL_CONFIG = YAML().load(open(config['panel_config']))
     TOKENIZER = YAML().load(open(config['tokenizer_config']))
-    print(f"Training on datasets: {PANEL_CONFIG['datasets']}")
-    MARKERS_SET = {k for dataset in PANEL_CONFIG['datasets'] for k in PANEL_CONFIG['markers'][dataset]}
-    print(f"Markers set: {MARKERS_SET}")
-    print(f"Number of markers: {len(MARKERS_SET)}")
-    TOKENIZER = {k: v for k, v in zip(MARKERS_SET, range(len(MARKERS_SET)))}
+    # print(f"Training on datasets: {PANEL_CONFIG['datasets']}")
+    # MARKERS_SET = {k for dataset in PANEL_CONFIG['datasets'] for k in PANEL_CONFIG['markers'][dataset]}
+    # print(f"Markers set: {MARKERS_SET}")
+    # print(f"Number of markers: {len(MARKERS_SET)}")
+    # TOKENIZER = {k: v for k, v in zip(MARKERS_SET, range(len(MARKERS_SET)))}
     INV_TOKENIZER = {v: k for k, v in TOKENIZER.items()}
 
     train_transform = Compose([
         # RandomRotation(180),
+        RandomCrop(SIZE)
         # TestCrop(SIZE[0]),
     ])
 

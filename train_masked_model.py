@@ -113,17 +113,17 @@ def train_masked(
 
             if (batch_idx+1) % gradient_accumulation_steps == 0:
                 scaler.unscale_(optimizer)
-                # torch.nn.utils.clip_grad_norm_(model.parameters(), max_norm=1.0)
+                torch.nn.utils.clip_grad_norm_(model.parameters(), max_norm=1.0)
                 scaler.step(optimizer)
                 scaler.update()
                 optimizer.zero_grad()
-                # scheduler.step()
+                scheduler.step()
                 run['train/loss'].append(loss.item())
                 run['train/lr'].append(scheduler.get_last_lr()[0])
                 run['train/µ'].append(mi.mean().item())
                 run['train/logvar'].append(logsigma.mean().item())
                 run['train/mae'].append(torch.abs(masked_img - mi).mean().item())
-        scheduler.step()
+        # scheduler.step()
 
         val_loss = test_masked(
             model, 
@@ -342,8 +342,8 @@ if __name__ == '__main__':
     gradient_accumulation_steps = config['gradient_accumulation_steps']
     epochs = config['epochs']
     num_warmup_steps = config['num_warmup_steps']
-    # num_annealing_steps = len(train_dataloader) * epochs // gradient_accumulation_steps - num_warmup_steps
-    num_annealing_steps = config['num_annealing_steps']
+    num_annealing_steps = len(train_dataloader) * epochs // gradient_accumulation_steps - num_warmup_steps
+    # num_annealing_steps = config['num_annealing_steps']
 
     optimizer = optim.AdamW(model.parameters(), lr=lr, weight_decay=weight_decay)
     scheduler = get_scheduler_with_warmup(optimizer, num_warmup_steps, num_annealing_steps, final_lr=final_lr, type='cosine', start_lr=start_lr, lr=lr)

@@ -7,38 +7,40 @@ superkernel:
   mlp_ratio: null
 
 encoder:
-    # layers_blocks: [2, 2, 2]
+    # layers_blocks: [2, 2, 2]  - spoko batch size 4, nb 2 - 6844MiB 
+    # layers_blocks: [1, 2, 1] - spoko 
+    # layers_blocks: [3, 3, 3] # sprawdzmy batch size 2 - spoko 8458MiB
     layers_blocks: [2, 2, 2]
-    embedding_dims: [192, 384, 512]
+    embedding_dims: [192, 384, 768] # testing 768
     # embedding_dims: [10, 20, 40]
     # embedding_dims: [100, 200, 400]
     maximum_frequency: 1
 
 decoder:
-  decoded_embed_dim: 512
-  num_blocks: 1
+  decoded_embed_dim: 768
+  num_blocks: 2
 
 # Data configuration
 panel_config: configs/all_panels_config.yaml
 tokenizer_config: configs/all_markers_tokenizer.yaml
 input_image_size: [113, 113]
-num_workers: 2
-batch_size: 1
+num_workers: 6
+batch_size: 4
 
 # Training configuration
-device: cuda:0
-lr: 2e-4
+device: cuda:1
+lr: 3e-4
 final_lr: 1e-6
 start_lr: 2e-6
 weight_decay: 0.0001
-gradient_accumulation_steps: 4
-epochs: 1000
-num_warmup_steps: 30000
+gradient_accumulation_steps: 1
+epochs: 1501
+num_warmup_steps: 15000 # slight change (was 30000)
 min_channels_frac: 0.5
 
 from_checkpoint: null
 checkpoints_dir: checkpoints
-save_checkpoint_freq: 200
+save_checkpoint_freq: 300
 
 # Neptune logging configuration
 tags: ['ConvNext', 'panel-1 data', 'Gaussian NLL', 'Steerable', 'escnn', 'real tanh scaling', 'impainting', 'real-global_normalize', 'output-trim', 'only-dataset-markers', 'old_loader', 'no-clipping', 'fixed-all-time-warmup', 'no-center-crop-on-training']

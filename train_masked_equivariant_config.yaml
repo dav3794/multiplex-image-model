@@ -26,22 +26,21 @@ num_workers: 4
 batch_size: 4
 
 # Training configuration
-device: cuda:0
-lr: 2e-4
+device: cuda:1
+lr: 5e-4
 final_lr: 1e-6
 start_lr: 2e-6
 weight_decay: 0.0001
-gradient_accumulation_steps: 1
-epochs: 2000
-num_warmup_steps: 200
-num_annealing_steps: 200
+gradient_accumulation_steps: 2
+epochs: 301
+num_warmup_steps: 3750
 min_channels_frac: 0.5
 
 from_checkpoint: null
 checkpoints_dir: checkpoints
-save_checkpoint_freq: 700
+save_checkpoint_freq: 100
 
 # Neptune logging configuration
-tags: ['ConvNext', 'panel-1 data', 'Gaussian NLL', 'Steerable', 'escnn', 'real tanh scaling', 'no-impainting', 'real-global_normalize', 'output-trim', 'only-dataset-markers', 'old_loader', 'no-clipping', 'fixed-all-time-warmup']
+tags: ['ConvNext', 'panel-1 data', 'Gaussian NLL', 'Steerable', 'escnn', 'real tanh scaling', 'no-impainting', 'output-trim', 'only-dataset-markers', 'old_loader', 'with-clipping', 'fixed-all-time-warmup', 'no-global_normalize']
 run_prefix: 'EquivariantConvnext'
 model_type: "EquivariantConvnext"

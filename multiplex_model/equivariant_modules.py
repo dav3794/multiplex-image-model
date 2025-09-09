@@ -32,6 +32,91 @@ import escnn
 from multiplex_model.modules import Superkernel, MultiplexImageDecoder
 
 
+class GRNByIrrep(nn.Module):
+    """
+    One γ, β per *copy* of an irrep (no matter its dimension).
+    This keeps equivariance for any ESCNN FieldType.
+    """
+
+    def __init__(self, field_type: e2nn.FieldType, eps=1e-6):
+        super().__init__()
+        self.eps = eps
+
+        # Build a list:  [(slice, dim)]     one entry per field
+        # `slice`   → the channel range in the tensor
+        # `dim`     → irrep dimension (1 for trivial, 2 for a real harmonic, ...)
+        self.fields = []
+        start = 0
+        for r in field_type:
+            size = r.size
+            self.fields.append((slice(start, start+size), size))
+            start += size
+
+        # One γ, β per field copy
+        self.gamma = nn.Parameter(torch.zeros(1, len(self.fields), 1, 1))
+        self.beta  = nn.Parameter(torch.zeros(1, len(self.fields), 1, 1))
+        self.ftype = field_type
+
+    # def forward(self, x: e2nn.GeometricTensor):
+    #     t = x.tensor                                    # [B,C,H,W]
+    #     B, C, H, W = t.shape
+
+    #     # compute per-field L2 norm  → shape  [B, n_fields, 1, 1]
+    #     norms = []
+    #     for sl, d in self.fields:
+    #         # sum squares over irrep dimension `d` and spatial dims H,W
+    #         n = t[:, sl].reshape(B, d, -1)              # [B,d,H*W]
+    #         n = torch.linalg.norm(n, ord=2, dim=(1,2), keepdim=True)
+    #         norms.append(n)
+    #     gx = torch.cat(norms, dim=1)                    # [B,nf,1,1]
+
+    #     # same rescaling as in the paper
+    #     nx = gx / (gx.mean(dim=1, keepdim=True) + self.eps)   # [B,nf,1,1]
+
+    #     # broadcast γ, β to the corresponding channels
+    #     out = t.clone()
+    #     # for i, (sl, _) in enumerate(self.fields):
+    #     #     out[:, sl] = (self.gamma[:, i] * (t[:, sl] * nx[:, i])
+    #     #                   + self.beta[:, i] + t[:, sl])
+    #     for i, (sl, _) in enumerate(self.fields):
+    #         gamma_i = self.gamma[:, i:i+1, ...]      # (1,1,1,1)
+    #         beta_i  = self.beta[:,  i:i+1, ...]      # (1,1,1,1)
+    #         nx_i    = nx[:,   i:i+1, ...]            # (B,1,1,1)
+
+    #         out[:, sl] = gamma_i * (t[:, sl] * nx_i) + beta_i + t[:, sl]
+    #     return e2nn.GeometricTensor(out, self.ftype)
+    def forward(self, x: e2nn.GeometricTensor):
+        t = x.tensor                                # [B, C, H, W]
+        B, C, H, W = t.shape
+
+        # ----------------------------------------------------------
+        # 1) per-field L2 norm  →  [B, n_fields, 1, 1]
+        # ----------------------------------------------------------
+        norms = []
+        # for sl, _ in self.fields:
+        #     # no need to flatten – just reduce across channel & space
+        #     n = torch.linalg.norm(t[:, sl], ord=2, dim=(1, 2, 3), keepdim=True)
+        #     norms.append(n)                         # each n: [B, 1, 1, 1]
+        norms = []
+        for sl, _ in self.fields:
+            n = torch.sqrt((t[:, sl] ** 2).sum(dim=(1, 2, 3), keepdim=True))
+            norms.append(n)                       # [B,1,1,1]
+
+        gx = torch.cat(norms, dim=1)                # [B, n_fields, 1, 1]
+        nx = gx / (gx.mean(dim=1, keepdim=True) + self.eps)
+
+        # ----------------------------------------------------------
+        # 2) apply γ, β per field (keep axis 1!)
+        # ----------------------------------------------------------
+        out = t.clone()
+        for i, (sl, _) in enumerate(self.fields):
+            gamma_i = self.gamma[:, i:i+1]          # [1,1,1,1]
+            beta_i  = self.beta[:,  i:i+1]          # [1,1,1,1]
+            nx_i    = nx[:,   i:i+1]                # [B,1,1,1]
+
+            out[:, sl] = gamma_i * (t[:, sl] * nx_i) + beta_i + t[:, sl]
+
+        return e2nn.GeometricTensor(out, self.ftype)
 
 
 # logging.basicConfig(level=logging.DEBUG)
@@ -490,7 +575,8 @@ class EquivariantMultiplexImageEncoder(nn.Module):
         # 0.  Group bookkeeping
         # ───────────────────────────────────────────────────────────────
         self.max_freq  = maximum_frequency
-        self.r2_act    = escnn.gspaces.rot2dOnR2(N=-1, maximum_frequency=maximum_frequency)        # SO(2)
+        # self.r2_act    = escnn.gspaces.rot2dOnR2(N=-1, maximum_frequency=maximum_frequency)        # SO(2)
+        self.r2_act    = escnn.gspaces.rot2dOnR2(N=-1, maximum_frequency=maximum_frequency)        # SO(2) - axis zero was throwing
         # self.r2_act    = e2cnn.gspaces.Rot2dOnR2(N=-1, maximum_frequency=maximum_frequency)        # SO(2)
         self.G: e2cnn.group.groups.O2         = self.r2_act.fibergroup
         bl_repr        = self.G.bl_regular_representation(self.max_freq)  # dim = 1+2*max_freq
@@ -656,7 +742,7 @@ class EquivariantMultiplexImageEncoder(nn.Module):
                 g = g.tensor  # Extract the raw tensor from GeometricTensor
             if return_features:
                 features.append(g)
-        print(f'Latent shape: {g.shape}')
+        # print(f'Latent shape: {g.shape}')
         outputs['output'] = g
         if return_features:
             outputs['features'] = features
