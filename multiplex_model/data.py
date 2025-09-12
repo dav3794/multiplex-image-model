@@ -23,6 +23,7 @@ class DatasetFromTIFF(Dataset):
             use_minmax_normalization: bool = False,
             use_clip_normalization: bool = True,
             global_upper_bound: float = 5.0,
+            use_global_clip_limits: bool = False,
         ):
         """Dataset for loading TIFF images from multiple panels.
 
@@ -57,7 +58,10 @@ class DatasetFromTIFF(Dataset):
             tiffs = glob(os.path.join(img_path, dataset, 'imgs', '*.tiff'))
             self.imgs.extend([(tiff, dataset) for tiff in tiffs])
 
-        self.clip_limits = panels_config.get('clip_limits', {})
+        if use_global_clip_limits:
+            self.clip_limits = {}
+        else:
+            self.clip_limits = panels_config.get('clip_limits', {})
         self.global_upper_bound = global_upper_bound
 
         self.transform = transform
@@ -129,7 +133,7 @@ class DatasetFromTIFF(Dataset):
         elif self.use_minmax_normalization:
             img = self.norm_minmax(img)
         
-        return img, channel_ids, dataset, img_path
+        return torch.tensor(img), channel_ids, dataset, img_path
 
 
 class SegmentationDataset(Dataset):

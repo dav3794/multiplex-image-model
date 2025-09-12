@@ -82,6 +82,7 @@ def plot_reconstructs_with_uncertainty(
         markers_names_map: Dict[int, str], 
         ncols: int = 9,
         scale_by_max: bool = True,
+        partially_masked_ids: List[int] = [],
     ):
     """Plot the original image and the reconstructed image
 
@@ -94,6 +95,7 @@ def plot_reconstructs_with_uncertainty(
         markers_names_map (Dict[int, str]): Channel index to marker name mapping
         ncols (int, optional): Number of columns on the plot. Defaults to 8.
         scale_by_max (bool, optional): Whether to scale the images by their maximum value. Defaults to True.
+        partially_masked_ids (List[int], optional): List of channel IDs that were only partially masked. Defaults to [].
 
     """
     # plot original image
@@ -122,7 +124,13 @@ def plot_reconstructs_with_uncertainty(
 
             ax_reconstructed.imshow(reconstructed_img[0, j].cpu().numpy(), cmap='CMRmap', vmin=0, vmax=1)
             is_masked = channel_ids[0, j].item() in masked_ids
-            masked_str = ' (masked)' if is_masked else ''
+            is_partially_masked = channel_ids[0, j].item() in partially_masked_ids
+            if is_partially_masked:
+                masked_str = ' (partially masked)'
+            elif is_masked:
+                masked_str = ' (masked)'
+            else:
+                masked_str = ''
             ax_reconstructed.set_title(f'Reconstructed{masked_str}\n{marker_name}')
 
             if scale_by_max:
