@@ -1,40 +1,53 @@
-superkernel:
-  embedding_dim: 96
-  num_layers: 0
-  num_heads: null
-  layer_type: linear
-  kernel_size: null
-  mlp_ratio: null
-
 encoder:
-    layers_blocks: [3, 3, 3]
-    embedding_dims: [192, 384, 768]
+    # marker-agnostic part
+    ma_layers_blocks: [6,]
+    ma_embedding_dims: [8,]
+    # pan-marker part
+    pm_layers_blocks: [6, 6]
+    pm_embedding_dims: [256, 512]
+
+    hyperkernel_config:
+      embedding_dim: 128
+      kernel_size: 1
+      padding: 0
+      stride: 1
+      use_bias: true
 
 decoder:
-  decoded_embed_dim: 512
-  num_blocks: 3
+  decoded_embed_dim: 384
+  num_blocks: 1
+
+  hyperkernel_config:
+      # embedding_dim == decoded_embed_dim
+      kernel_size: 1
+      padding: 0
+      stride: 1
+      use_bias: true
 
 # Data configuration
 panel_config: configs/all_panels_config.yaml
 tokenizer_config: configs/all_markers_tokenizer.yaml
-input_image_size: [112, 112]
+input_image_size: [128, 128]
 num_workers: 8
-batch_size: 2
+batch_size: 8
 
 # Training configuration
-device: cuda:1
+device: cuda
 lr: 5e-4
-final_lr: 1e-6
+final_lr: 1e-5
 weight_decay: 0.0001
-gradient_accumulation_steps: 4
-epochs: 200
-num_warmup_steps: 200
-min_channels_frac: 0.5
+gradient_accumulation_steps: 1
+epochs: 10
+frac_warmup_steps: 0.1
+min_channels_frac: 0.75
+spatial_masking_ratio: 0.6
+fully_masked_channels_max_frac: 0.5
+mask_patch_size: 8
 from_checkpoint: null
 checkpoints_dir: checkpoints
-save_checkpoint_freq: 50
+save_checkpoint_freq: 5
 
 # Neptune logging configuration
-tags: ['ConvNext', 'ALL DATA', 'Gaussian NLL',]
+tags: [...]
 neptune_project: ...
 neptune_api_token: ...

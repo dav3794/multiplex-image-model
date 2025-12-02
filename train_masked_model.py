@@ -10,7 +10,8 @@ from ruamel.yaml import YAML
 from torch.amp import GradScaler, autocast
 from torch.utils.data import DataLoader
 from torchvision.transforms import Compose
-from torchvision.transforms import RandomRotation, RandomCrop
+from torchvision.transforms import RandomRotation, RandomCrop, RandomHorizontalFlip
+from torchvision.transforms.functional import InterpolationMode
 from tqdm import tqdm
 
 from multiplex_model.data import DatasetFromTIFF, PanelBatchSampler, TestCrop
@@ -29,9 +30,12 @@ def train_masked(
         marker_names_map,
         epochs=10, 
         gradient_accumulation_steps=1,
-        min_channels_frac=0.5,
+        min_channels_frac=0.75,
+        fully_masked_channels_max_frac=0.5,
+        spatial_masking_ratio=0.6,
+        mask_patch_size=8,
         start_epoch=0,
-        save_checkpoint_every=50,
+        save_checkpoint_every=5,
         checkpoints_path='checkpoints'
     ):
     """Train a masked autoencoder (decode the remaining channels) with the given parameters."""
@@ -47,32 +51,54 @@ def train_masked(
         model.train()
         for batch_idx, (img, channel_ids, panel_idx, img_path) in enumerate(tqdm(train_dataloader, desc=f'Epoch {epoch}')):
             batch_size, num_channels, H, W = img.shape
+            img = img.to(device, dtype=torch.float32)
+            channel_ids = channel_ids.to(device, dtype=torch.long)
 
             # Randomly sample a subset of channels to keep
             min_channels = int(np.ceil(num_channels * min_channels_frac))
+            num_sampled_channels = np.random.randint(min_channels, num_channels+1)
 
-            num_sampled_channels = np.random.randint(min_channels, num_channels)
-            channels_subset_idx = [
-                np.random.choice(
-                    np.arange(num_channels), 
-                    size=(1, num_sampled_channels), 
-                    replace=False
-                ) for _ in range(batch_size)
-            ]
-
-            channels_subset_indices = np.concatenate(channels_subset_idx, axis=0)
-            channels_subset_indices = torch.tensor(channels_subset_indices, dtype=torch.long)
-
-            channels_subset_indices = channels_subset_indices.unsqueeze(-1).unsqueeze(-1).expand(-1, -1, H, W)  # Shape: [batch_size, num_sampled_channels, H, W]
-            masked_img = torch.gather(img, dim=1, index=channels_subset_indices).to(device) 
-
-            # Gather corresponding channel IDs
-            active_channel_ids = torch.gather(channel_ids, dim=1, index=channels_subset_indices[:, :, 0, 0]).to(device)
+            if num_sampled_channels < num_channels:
+                new_img = []
+                new_channel_ids = []
+                for b_i in range(batch_size):
+                    channels_subset_idx = torch.randperm(num_channels)[:num_sampled_channels]
+                    new_img.append(img[b_i:b_i+1, channels_subset_idx, :, :])
+                    new_channel_ids.append(channel_ids[b_i:b_i+1, channels_subset_idx])
+                img = torch.cat(new_img, dim=0)
+                channel_ids = torch.cat(new_channel_ids, dim=0)
 
 
-            img = img.to(device)
-            channel_ids = channel_ids.to(device)
-            masked_img = masked_img.to(torch.float32)
+            # sample full channels to mask (drop)
+            max_channels_to_mask = int(np.ceil(num_sampled_channels * fully_masked_channels_max_frac))
+            num_channels_to_mask = np.random.randint(1, max_channels_to_mask + 1)
+            masked_img = []
+            active_channel_ids = []
+            for b_i in range(batch_size):
+                channels_to_keep = torch.randperm(num_sampled_channels)[num_channels_to_mask:]
+                masked_img.append(img[b_i:b_i+1, channels_to_keep, :, :])
+                active_channel_ids.append(channel_ids[b_i:b_i+1, channels_to_keep])
+            masked_img = torch.cat(masked_img, dim=0) # [B, C_new, H, W]
+            active_channel_ids = torch.cat(active_channel_ids, dim=0) # [B, C_new]
+            num_active_channels = masked_img.shape[1]
+
+            # randomly mask spatial_masking_ratio image patches
+            # unfold image into patches
+            h = w = H // mask_patch_size
+            total_patches = h * w
+            mask = torch.rand((batch_size, num_active_channels, total_patches), device=masked_img.device)
+            mask = mask <= spatial_masking_ratio
+
+            masked_img = masked_img.unfold(2, mask_patch_size, mask_patch_size)
+            masked_img = masked_img.unfold(3, mask_patch_size, mask_patch_size).contiguous()
+            masked_img = masked_img.view(batch_size, num_active_channels, h*w, mask_patch_size*mask_patch_size)
+
+            masked_img[mask] = 0.0  # mask patches by setting to zero
+
+            # fold back to image
+            masked_img = masked_img.view(batch_size, num_active_channels, h, w, mask_patch_size, mask_patch_size)
+            masked_img = masked_img.permute(0, 1, 2, 4, 3, 5).contiguous().view(batch_size, num_active_channels, H, W)
+                              
 
             with autocast(device_type='cuda', dtype=torch.bfloat16):
                 output = model(masked_img, active_channel_ids, channel_ids)['output']
@@ -92,6 +118,7 @@ def train_masked(
                     assert False, "Non-finite loss encountered. Check the model and data."
 
             scaler.scale(loss / gradient_accumulation_steps).backward()
+            # scaler.scale(loss).backward()
 
             if (batch_idx+1) % gradient_accumulation_steps == 0:
                 scaler.unscale_(optimizer)
@@ -105,6 +132,7 @@ def train_masked(
                 run['train/µ'].append(mi.mean().item())
                 run['train/logvar'].append(logsigma.mean().item())
                 run['train/mae'].append(torch.abs(img - mi).mean().item())
+                run['train/mse'].append(torch.square(img - mi).mean().item())
 
 
         val_loss = test_masked(
@@ -113,7 +141,9 @@ def train_masked(
             device, 
             run, 
             epoch, 
-            min_channels_frac=min_channels_frac,
+            spatial_masking_ratio=spatial_masking_ratio,
+            fully_masked_channels_max_frac=fully_masked_channels_max_frac,
+            mask_patch_size=mask_patch_size,
             marker_names_map=marker_names_map,
         )
         print(f'Validation loss: {val_loss:.4f}')
@@ -146,40 +176,53 @@ def test_masked(
         epoch,
         marker_names_map,
         num_plots=5, 
-        min_channels_frac=0.5
+        spatial_masking_ratio=0.6,
+        fully_masked_channels_max_frac=0.5,
+        mask_patch_size=8,
         ):
     model.eval()
     running_loss = 0.0
     running_mae = 0.0
+    running_mse = 0.0
     plot_indices = np.random.choice(np.arange(len(test_dataloader)), size=num_plots, replace=False)
     plot_indices = set(plot_indices)
     rand_gen = torch.Generator().manual_seed(42)
+
     with torch.no_grad():
         for idx, (img, channel_ids, panel_idx, img_path) in enumerate(tqdm(test_dataloader, desc=f'Testing epoch {epoch}')):
             batch_size, num_channels, H, W = img.shape
-            min_channels = int(np.ceil(num_channels * min_channels_frac))
-            
-            num_sampled_channels = torch.randint(min_channels, num_channels, (1,), generator=rand_gen).item()
-            channels_subset_idx = [
-                np.random.choice(
-                    np.arange(num_channels), 
-                    size=(1, num_sampled_channels), 
-                    replace=False,
-                ) for _ in range(batch_size)
-            ]
+            img = img.to(device, dtype=torch.float32)
+            channel_ids = channel_ids.to(device, dtype=torch.long)
 
-            channels_subset_indices = np.concatenate(channels_subset_idx, axis=0)
-            channels_subset_indices = torch.tensor(channels_subset_indices, dtype=torch.long)
-            
-            channels_subset_indices = channels_subset_indices.unsqueeze(-1).unsqueeze(-1).expand(-1, -1, H, W)  # Shape: [batch_size, num_sampled_channels, H, W]
-            masked_img = torch.gather(img, dim=1, index=channels_subset_indices).to(device) 
+            # sample full channels to mask (drop)
+            max_channels_to_mask = int(np.ceil(num_channels * fully_masked_channels_max_frac))
+            num_channels_to_mask = np.random.randint(1, max_channels_to_mask + 1)
+            masked_img = []
+            active_channel_ids = []
+            for b_i in range(batch_size):
+                channels_to_keep = torch.randperm(num_channels)[num_channels_to_mask:]
+                masked_img.append(img[b_i:b_i+1, channels_to_keep, :, :])
+                active_channel_ids.append(channel_ids[b_i:b_i+1, channels_to_keep])
+            masked_img = torch.cat(masked_img, dim=0) # [B, C_new, H, W]
+            active_channel_ids = torch.cat(active_channel_ids, dim=0) # [B, C_new]
+            num_active_channels = masked_img.shape[1]
 
-            # Gather corresponding channel IDs
-            active_channel_ids = torch.gather(channel_ids, dim=1, index=channels_subset_indices[:, :, 0, 0]).to(device)
+            # randomly mask spatial_masking_ratio image patches
+            # unfold image into patches
+            h = w = H // mask_patch_size
+            total_patches = h * w
+            mask = torch.rand((batch_size, num_active_channels, total_patches), device=masked_img.device)
+            mask = mask <= spatial_masking_ratio
 
-            channel_ids = channel_ids.to(device)
-            masked_img = masked_img.to(torch.float32)
-            img = img.to(device)
+            masked_img = masked_img.unfold(2, mask_patch_size, mask_patch_size)
+            masked_img = masked_img.unfold(3, mask_patch_size, mask_patch_size).contiguous()
+            masked_img = masked_img.view(batch_size, num_active_channels, h*w, mask_patch_size*mask_patch_size)
+
+            masked_img[mask] = 0.0  # mask patches by setting to zero
+
+            # fold back to image
+            masked_img = masked_img.view(batch_size, num_active_channels, h, w, mask_patch_size, mask_patch_size)
+            masked_img = masked_img.permute(0, 1, 2, 4, 3, 5).contiguous().view(batch_size, num_active_channels, H, W)
 
             output = model(masked_img, active_channel_ids, channel_ids)['output']
             mi, logsigma = output.unbind(dim=-1)
@@ -188,11 +231,13 @@ def test_masked(
             loss = nll_loss(img, mi, logsigma)
             running_loss += loss.item()
             running_mae += torch.abs(img - mi).mean().item()
+            running_mse += torch.square(img - mi).mean().item()
 
             if idx in plot_indices:
                 uncertainty_img = torch.exp(logsigma)
                 unactive_channels = [i for i in channel_ids[0] if i not in active_channel_ids[0]]
                 masked_channels_names = '\n'.join([marker_names_map[i.item()] for i in unactive_channels])
+                partially_masked_ids = [i for i, m in enumerate(mask[0]) if m]
 
                 reconstr_img = plot_reconstructs_with_uncertainty(
                     img,
@@ -201,7 +246,8 @@ def test_masked(
                     channel_ids,
                     unactive_channels,
                     markers_names_map=marker_names_map,
-                    scale_by_max=True
+                    scale_by_max=True,
+                    partially_masked_ids=partially_masked_ids
                 )
                 run['val/imgs'].append(
                     reconstr_img, 
@@ -214,6 +260,7 @@ def test_masked(
     val_loss = running_loss / len(test_dataloader)
     run['val/loss'].append(val_loss)
     run['val/mae'].append(running_mae / len(test_dataloader))
+    run['val/mse'].append(running_mse / len(test_dataloader))
     
     return val_loss
 
@@ -237,8 +284,12 @@ if __name__ == '__main__':
     INV_TOKENIZER = {v: k for k, v in TOKENIZER.items()}
 
     train_transform = Compose([
-        RandomRotation(180),
+        RandomRotation(
+            180, 
+            interpolation=InterpolationMode.BILINEAR
+        ),
         RandomCrop(SIZE),
+        RandomHorizontalFlip(),
     ])
 
     test_transform = TestCrop(SIZE[0])
@@ -248,8 +299,12 @@ if __name__ == '__main__':
         split='train',
         marker_tokenizer=TOKENIZER,
         transform=train_transform,
+        use_preprocessing=False, # saved data is already preprocessed
         use_median_denoising=False,
-        use_butterworth_filter=True
+        use_butterworth_filter=True,
+        use_minmax_normalization=False,
+        use_clip_normalization=True,
+        file_extension='npy'
     )
 
     test_dataset = DatasetFromTIFF(
@@ -257,19 +312,37 @@ if __name__ == '__main__':
         split='test',
         marker_tokenizer=TOKENIZER,
         transform=test_transform,
+        use_preprocessing=False, # saved data is already preprocessed
         use_median_denoising=False,
-        use_butterworth_filter=True
+        use_butterworth_filter=True,
+        use_minmax_normalization=False,
+        use_clip_normalization=True,
+        file_extension='npy'
     )
 
     train_batch_sampler = PanelBatchSampler(train_dataset, BATCH_SIZE)
     test_batch_sampler = PanelBatchSampler(test_dataset, BATCH_SIZE, shuffle=False)
 
-    train_dataloader = DataLoader(train_dataset, batch_sampler=train_batch_sampler, num_workers=NUM_WORKERS)
-    test_dataloader = DataLoader(test_dataset, batch_sampler=test_batch_sampler, num_workers=NUM_WORKERS)
+    train_dataloader = DataLoader(
+        train_dataset, 
+        batch_sampler=train_batch_sampler, 
+        num_workers=NUM_WORKERS, 
+        pin_memory=True, 
+        persistent_workers=True,
+        prefetch_factor=4
+    )
+    test_dataloader = DataLoader(
+        test_dataset, 
+        batch_sampler=test_batch_sampler, 
+        num_workers=NUM_WORKERS, 
+        pin_memory=True, 
+        persistent_workers=True,
+        prefetch_factor=4
+    )
+
 
     model_config = {
         'num_channels': len(TOKENIZER),
-        'superkernel_config': config['superkernel'],
         'encoder_config': config['encoder'],
         'decoder_config': config['decoder'],
     }
@@ -281,11 +354,13 @@ if __name__ == '__main__':
     weight_decay = config['weight_decay']
     gradient_accumulation_steps = config['gradient_accumulation_steps']
     epochs = config['epochs']
-    num_warmup_steps = config['num_warmup_steps']
-    num_annealing_steps = len(train_dataloader) * epochs // gradient_accumulation_steps - num_warmup_steps
+    frac_warmup_steps = config['frac_warmup_steps']
+    total_steps = len(train_dataloader) * epochs // gradient_accumulation_steps
+    num_warmup_steps = int(total_steps * frac_warmup_steps)
+    num_annealing_steps = total_steps - num_warmup_steps
 
     optimizer = optim.AdamW(model.parameters(), lr=lr, weight_decay=weight_decay)
-    scheduler = get_scheduler_with_warmup(optimizer, num_warmup_steps, num_annealing_steps, final_lr=final_lr, type='cosine')
+    scheduler = get_scheduler_with_warmup(optimizer, num_warmup_steps, num_annealing_steps, final_lr=final_lr, base_lr=lr, type='cosine')
 
     if 'from_checkpoint' in config and config['from_checkpoint']:
         print(f'Loading model from checkpoint: {config["from_checkpoint"]}')
@@ -296,6 +371,11 @@ if __name__ == '__main__':
         start_epoch = checkpoint['epoch'] + 1
     else:
         start_epoch = 0
+
+    min_channels_frac = config['min_channels_frac']
+    spatial_masking_ratio = config['spatial_masking_ratio']
+    fully_masked_channels_max_frac = config['fully_masked_channels_max_frac']
+    mask_patch_size = config['mask_patch_size']
 
     run = neptune.init_run(
         project=config['neptune_project'],
@@ -314,6 +394,10 @@ if __name__ == '__main__':
         "num_annealing_steps": num_annealing_steps,
         "model_config": stringify_unsupported(model_config),
         "from_checkpoint": config.get('from_checkpoint', None),
+        "min_channels_frac": min_channels_frac,
+        "spatial_masking_ratio": spatial_masking_ratio,
+        "fully_masked_channels_max_frac": fully_masked_channels_max_frac,
+        "mask_patch_size": mask_patch_size,
     }
 
     train_masked(
@@ -327,7 +411,10 @@ if __name__ == '__main__':
         start_epoch=start_epoch,
         gradient_accumulation_steps=gradient_accumulation_steps,
         run=run,
-        min_channels_frac=config['min_channels_frac'],
+        min_channels_frac=min_channels_frac,
+        spatial_masking_ratio=spatial_masking_ratio,
+        fully_masked_channels_max_frac=fully_masked_channels_max_frac,
+        mask_patch_size=mask_patch_size,
         save_checkpoint_every=config['save_checkpoint_freq'],
         marker_names_map=INV_TOKENIZER,
     )

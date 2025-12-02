@@ -42,6 +42,7 @@ def get_scheduler_with_warmup(
         num_warmup_steps: int,
         num_annealing_steps: int,
         final_lr: float,
+        base_lr: float = 1.0,
         type: Literal['cosine', 'linear'] = 'cosine'
     ) -> LambdaLR:
     """Get cosine annealing scheduler with warmup, adapted from:
@@ -56,18 +57,19 @@ def get_scheduler_with_warmup(
     Returns:
         LambdaLR: Scheduler
     """
+    final_lr_mult = final_lr / base_lr
     def lr_lambda(current_step, type: Literal['cosine', 'linear'] = 'cosine'):
         if current_step < num_warmup_steps:
             return float(max(1, current_step)) / float(max(1, num_warmup_steps))
         elif current_step >= num_annealing_steps + num_warmup_steps:
-            return final_lr
+            return final_lr_mult
         
         progress = (current_step - num_warmup_steps) / float(max(1, num_annealing_steps - num_warmup_steps))
         
         if type == 'linear':
-            return max(final_lr, (1.0 - progress) * (1.0 - final_lr) + final_lr)
+            return max(final_lr_mult, (1.0 - progress) * (1.0 - final_lr_mult) + final_lr_mult)
         
-        return final_lr + (1.0 - final_lr) * 0.5 * (1.0 + cos(pi * progress))
+        return final_lr_mult + (1.0 - final_lr_mult) * 0.5 * (1.0 + cos(pi * progress))
 
     lr_lambda = partial(lr_lambda, type=type)
     return LambdaLR(optimizer, lr_lambda, -1)
@@ -82,6 +84,7 @@ def plot_reconstructs_with_uncertainty(
         markers_names_map: Dict[int, str], 
         ncols: int = 9,
         scale_by_max: bool = True,
+        partially_masked_ids: List[int] = [],
     ):
     """Plot the original image and the reconstructed image
 
@@ -94,6 +97,7 @@ def plot_reconstructs_with_uncertainty(
         markers_names_map (Dict[int, str]): Channel index to marker name mapping
         ncols (int, optional): Number of columns on the plot. Defaults to 8.
         scale_by_max (bool, optional): Whether to scale the images by their maximum value. Defaults to True.
+        partially_masked_ids (List[int], optional): List of channel IDs that were only partially masked. Defaults to [].
 
     """
     # plot original image
@@ -122,7 +126,13 @@ def plot_reconstructs_with_uncertainty(
 
             ax_reconstructed.imshow(reconstructed_img[0, j].cpu().numpy(), cmap='CMRmap', vmin=0, vmax=1)
             is_masked = channel_ids[0, j].item() in masked_ids
-            masked_str = ' (masked)' if is_masked else ''
+            is_partially_masked = channel_ids[0, j].item() in partially_masked_ids
+            if is_partially_masked:
+                masked_str = ' (partially masked)'
+            elif is_masked:
+                masked_str = ' (masked)'
+            else:
+                masked_str = ''
             ax_reconstructed.set_title(f'Reconstructed{masked_str}\n{marker_name}')
 
             if scale_by_max:
