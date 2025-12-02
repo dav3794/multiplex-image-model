@@ -42,6 +42,7 @@ def get_scheduler_with_warmup(
         num_warmup_steps: int,
         num_annealing_steps: int,
         final_lr: float,
+        base_lr: float = 1.0,
         type: Literal['cosine', 'linear'] = 'cosine'
     ) -> LambdaLR:
     """Get cosine annealing scheduler with warmup, adapted from:
@@ -56,18 +57,19 @@ def get_scheduler_with_warmup(
     Returns:
         LambdaLR: Scheduler
     """
+    final_lr_mult = final_lr / base_lr
     def lr_lambda(current_step, type: Literal['cosine', 'linear'] = 'cosine'):
         if current_step < num_warmup_steps:
             return float(max(1, current_step)) / float(max(1, num_warmup_steps))
         elif current_step >= num_annealing_steps + num_warmup_steps:
-            return final_lr
+            return final_lr_mult
         
         progress = (current_step - num_warmup_steps) / float(max(1, num_annealing_steps - num_warmup_steps))
         
         if type == 'linear':
-            return max(final_lr, (1.0 - progress) * (1.0 - final_lr) + final_lr)
+            return max(final_lr_mult, (1.0 - progress) * (1.0 - final_lr_mult) + final_lr_mult)
         
-        return final_lr + (1.0 - final_lr) * 0.5 * (1.0 + cos(pi * progress))
+        return final_lr_mult + (1.0 - final_lr_mult) * 0.5 * (1.0 + cos(pi * progress))
 
     lr_lambda = partial(lr_lambda, type=type)
     return LambdaLR(optimizer, lr_lambda, -1)
