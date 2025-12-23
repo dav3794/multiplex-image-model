@@ -149,6 +149,125 @@ def plot_reconstructs_with_uncertainty(
 
     return fig_orig
 
+
+def plot_reconstructs_with_masks(
+        orig_img: torch.Tensor, 
+        reconstructed_img: torch.Tensor, 
+        pixel_masks: torch.Tensor,
+        channel_ids: torch.Tensor,
+        fully_masked_ids: List[int],
+        markers_names_map: Dict[int, str], 
+        ncols: int = 9,
+    ):
+    """Plot the original image, masked image (with white pixels where masked), and reconstruction.
+
+    Args:
+        orig_img (torch.Tensor): Original image [B, C, H, W]
+        reconstructed_img (torch.Tensor): Reconstructed image [B, C_all, H, W] (all channels)
+        pixel_masks (torch.Tensor): Boolean pixel-level masks [B, C_active, H, W] where True = masked
+        channel_ids (torch.Tensor): Indices of all channels [B, C_all]
+        fully_masked_ids (List[int]): List of channel IDs that were fully masked (dropped)
+        markers_names_map (Dict[int, str]): Channel index to marker name mapping
+        ncols (int, optional): Number of columns on the plot. Defaults to 9.
+
+    Returns:
+        matplotlib.figure.Figure: The generated figure
+    """
+    num_channels = orig_img.shape[1]
+    
+    nrows = ceil(num_channels / (ncols // 3))
+    fig, axs = plt.subplots(nrows, ncols, figsize=(ncols*2, nrows*2))
+    ax_flat = axs.flatten()
+    
+    # Create mapping from channel_id to index in masked_img
+    active_channel_ids = [cid for cid in channel_ids[0].tolist() if cid not in fully_masked_ids]
+    channel_to_masked_idx = {cid: idx for idx, cid in enumerate(active_channel_ids)}
+    
+    for i in range(0, len(ax_flat), 3):
+        j = i // 3
+        
+        ax_orig = ax_flat[i]
+        
+        ax_masked = ax_flat[i+1]
+        
+        ax_reconstructed = ax_flat[i+2]
+        
+        if j < num_channels:
+            channel_id = channel_ids[0, j].item()
+            marker_name = markers_names_map[channel_id]
+            
+            # Show original
+            ax_orig.imshow(orig_img[0, j].cpu().numpy(), cmap='CMRmap', vmin=0, vmax=1)
+            ax_orig.set_title(f'Original\n{marker_name}')
+            ax_orig.set_xticks([])
+            ax_orig.set_yticks([])
+            # Add black frame
+            for spine in ax_orig.spines.values():
+                spine.set_edgecolor('black')
+                spine.set_linewidth(1)
+                spine.set_visible(True)
+            
+            # Show masked version
+            if channel_id in fully_masked_ids:
+                # Fully masked channel - show all white (RGBA)
+                white_img = np.ones((*orig_img[0, j].shape, 4))
+                white_img[..., :3] = 1.0  # RGB = white
+                white_img[..., 3] = 1.0   # Alpha = 100% opaque
+                ax_masked.imshow(white_img)
+                ax_masked.set_title(f'Masked (fully)\n{marker_name}')
+                ax_masked.set_xticks([])
+                ax_masked.set_yticks([])
+                # Add black frame
+                for spine in ax_masked.spines.values():
+                    spine.set_edgecolor('black')
+                    spine.set_linewidth(1)
+                    spine.set_visible(True)
+            else:
+                # Partially masked channel - show with white pixels where masked
+                masked_idx = channel_to_masked_idx[channel_id]
+                
+                # Convert grayscale to RGBA using colormap (image already normalized to 0-1)
+                cmap = plt.cm.CMRmap
+                img_data = orig_img[0, j].cpu().numpy()
+                rgba_img = cmap(img_data)  # Apply colormap directly
+                
+                # Set masked pixels to pure white with 100% opacity
+                mask_np = pixel_masks[0, masked_idx].cpu().numpy()
+                rgba_img[mask_np] = [1.0, 1.0, 1.0, 1.0]  # Pure white, fully opaque
+                
+                ax_masked.imshow(rgba_img)
+                ax_masked.set_title(f'Masked\n{marker_name}')
+                ax_masked.set_xticks([])
+                ax_masked.set_yticks([])
+                # Add black frame
+                for spine in ax_masked.spines.values():
+                    spine.set_edgecolor('black')
+                    spine.set_linewidth(1)
+                    spine.set_visible(True)
+            
+            # Show reconstruction
+            ax_reconstructed.imshow(reconstructed_img[0, j].cpu().numpy(), cmap='CMRmap', vmin=0, vmax=1)
+            ax_reconstructed.set_title(f'Reconstructed\n{marker_name}')
+            ax_reconstructed.set_xticks([])
+            ax_reconstructed.set_yticks([])
+            # Add black frame
+            for spine in ax_reconstructed.spines.values():
+                spine.set_edgecolor('black')
+                spine.set_linewidth(1)
+                spine.set_visible(True)
+        else:
+            # Turn off empty subplots
+            ax_orig.axis('off')
+            ax_masked.axis('off')
+            ax_reconstructed.axis('off')
+            spine.set_linewidth(1)
+            spine.set_visible(True)
+    
+    fig.tight_layout()
+    return fig
+
+
+
 def plot_segmentation(
         orig_mask: torch.Tensor, 
         pred_mask: torch.Tensor, 

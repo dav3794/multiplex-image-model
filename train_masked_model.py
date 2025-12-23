@@ -16,7 +16,7 @@ from tqdm import tqdm
 
 from multiplex_model.data import DatasetFromTIFF, PanelBatchSampler, TestCrop
 from multiplex_model.losses import nll_loss
-from multiplex_model.utils import ClampWithGrad, plot_reconstructs_with_uncertainty, get_scheduler_with_warmup
+from multiplex_model.utils import ClampWithGrad, plot_reconstructs_with_masks, get_scheduler_with_warmup
 from multiplex_model.modules import MultiplexAutoencoder
 
 def train_masked(
@@ -83,22 +83,12 @@ def train_masked(
             num_active_channels = masked_img.shape[1]
 
             # randomly mask spatial_masking_ratio image patches
-            # unfold image into patches
             h = w = H // mask_patch_size
-            total_patches = h * w
-            mask = torch.rand((batch_size, num_active_channels, total_patches), device=masked_img.device)
+            mask = torch.rand((batch_size, num_active_channels, h, w), device=masked_img.device)
             mask = mask <= spatial_masking_ratio
-
-            masked_img = masked_img.unfold(2, mask_patch_size, mask_patch_size)
-            masked_img = masked_img.unfold(3, mask_patch_size, mask_patch_size).contiguous()
-            masked_img = masked_img.view(batch_size, num_active_channels, h*w, mask_patch_size*mask_patch_size)
-
-            masked_img[mask] = 0.0  # mask patches by setting to zero
-
-            # fold back to image
-            masked_img = masked_img.view(batch_size, num_active_channels, h, w, mask_patch_size, mask_patch_size)
-            masked_img = masked_img.permute(0, 1, 2, 4, 3, 5).contiguous().view(batch_size, num_active_channels, H, W)
-                              
+            pixel_mask = mask.repeat_interleave(mask_patch_size, dim=2).repeat_interleave(mask_patch_size, dim=3)
+    
+            masked_img[pixel_mask] = 0.0  # mask patches by setting to zero
 
             with autocast(device_type='cuda', dtype=torch.bfloat16):
                 output = model(masked_img, active_channel_ids, channel_ids)['output']
@@ -208,21 +198,12 @@ def test_masked(
             num_active_channels = masked_img.shape[1]
 
             # randomly mask spatial_masking_ratio image patches
-            # unfold image into patches
             h = w = H // mask_patch_size
-            total_patches = h * w
-            mask = torch.rand((batch_size, num_active_channels, total_patches), device=masked_img.device)
+            mask = torch.rand((batch_size, num_active_channels, h, w), device=masked_img.device)
             mask = mask <= spatial_masking_ratio
-
-            masked_img = masked_img.unfold(2, mask_patch_size, mask_patch_size)
-            masked_img = masked_img.unfold(3, mask_patch_size, mask_patch_size).contiguous()
-            masked_img = masked_img.view(batch_size, num_active_channels, h*w, mask_patch_size*mask_patch_size)
-
-            masked_img[mask] = 0.0  # mask patches by setting to zero
-
-            # fold back to image
-            masked_img = masked_img.view(batch_size, num_active_channels, h, w, mask_patch_size, mask_patch_size)
-            masked_img = masked_img.permute(0, 1, 2, 4, 3, 5).contiguous().view(batch_size, num_active_channels, H, W)
+            pixel_mask = mask.repeat_interleave(mask_patch_size, dim=2).repeat_interleave(mask_patch_size, dim=3)
+    
+            masked_img[pixel_mask] = 0.0  # mask patches by setting to zero
 
             output = model(masked_img, active_channel_ids, channel_ids)['output']
             mi, logsigma = output.unbind(dim=-1)
@@ -234,24 +215,33 @@ def test_masked(
             running_mse += torch.square(img - mi).mean().item()
 
             if idx in plot_indices:
-                uncertainty_img = torch.exp(logsigma)
+                # uncertainty_img = torch.exp(logsigma)
                 unactive_channels = [i for i in channel_ids[0] if i not in active_channel_ids[0]]
                 masked_channels_names = '\n'.join([marker_names_map[i.item()] for i in unactive_channels])
-                partially_masked_ids = active_channel_ids[0].tolist()
+                # partially_masked_ids = active_channel_ids[0].tolist()
 
-                reconstr_img = plot_reconstructs_with_uncertainty(
+                # reconstr_img = plot_reconstructs_with_uncertainty(
+                #     img,
+                #     mi,
+                #     uncertainty_img,
+                #     channel_ids,
+                #     unactive_channels,
+                #     markers_names_map=marker_names_map,
+                #     scale_by_max=True,
+                #     partially_masked_ids=partially_masked_ids
+                # )
+                reconstr_img = plot_reconstructs_with_masks(
                     img,
                     mi,
-                    uncertainty_img,
+                    pixel_mask,
                     channel_ids,
                     unactive_channels,
                     markers_names_map=marker_names_map,
-                    scale_by_max=True,
-                    partially_masked_ids=partially_masked_ids
+                    ncols=9
                 )
                 run['val/imgs'].append(
                     reconstr_img, 
-                    description=f'Resuilting outputs (variance scaled by min-max)  (dataset {panel_idx[0]}, image {img_path[0]}, epoch {epoch})'
+                    description=f'Resulting outputs  (dataset {panel_idx[0]}, image {img_path[0]}, epoch {epoch+1})'
                                 '\n\nMasked channels: {}'.format(masked_channels_names)
                 )
                 plt.close('all')
