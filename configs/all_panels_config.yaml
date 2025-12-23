@@ -1,6 +1,6 @@
 paths:
-  train: /raid_encrypted/immucan/immuvis_split_patches_onlyarcsinh/train
-  test: /raid_encrypted/immucan/immuvis_split_patches_onlyarcsinh/test
+  train: /raid_encrypted/immucan/immuvis_split_onlyarcsinh/train
+  test: /raid_encrypted/immucan/immuvis_split_onlyarcsinh/test
 datasets:
 - ajaib
 - bc2
@@ -21,9 +21,11 @@ datasets:
 - jackson-basel
 - jackson-zurich
 - kucukkose
+- meyer
 - nsclc2-panel1
 - nsclc2-panel2
 - ohara
+- rigamonti_2025
 - steenbuck-immune
 - steenbuck-islets
 - susman
@@ -48,9 +50,11 @@ clip_limits:
   jackson-basel: 2.3
   jackson-zurich: 2.4
   kucukkose: 2.8
+  meyer: 2.7
   nsclc2-panel1: 3.1
   nsclc2-panel2: 2.7
   ohara: 3.6
+  rigamonti_2025: 3.2
   steenbuck-immune: 1.9
   steenbuck-islets: 2.6
   susman: 4.0
@@ -211,6 +215,164 @@ markers:
   - TGFB
   - TMEM119
   - TNC
+  cords-fibro:
+  - anti-Hu
+  - Cadherin-11
+  - Carbonic Anhydrase
+  - CCL21
+  - CD10
+  - CD11b
+  - CD11c
+  - CD146
+  - CD20
+  - CD3
+  - CD31-vWF
+  - CD34
+  - CD4
+  - CD45
+  - CD68
+  - CD73
+  - CD8a
+  - CXCL13
+  - DNA1
+  - DNA2
+  - FAP
+  - Fibronectin
+  - FOXP3
+  - FSP1
+  - Histone H3
+  - HLADR
+  - Ido1
+  - Ki67
+  - LYVE1
+  - MMP9
+  - MPO
+  - p75
+  - panCK
+  - PDGFRb
+  - PNAd
+  - Podoplanin
+  - SMA
+  - VCAM1
+  - Vimentin
+  meyer:
+  - AR
+  - Bcl2
+  - c-Caspase3c-PARP
+  - c-Myc
+  - Carbonic Anhydrase
+  - CD11c
+  - CD15
+  - CD20
+  - CD3
+  - CD31-vWF
+  - CD4
+  - CD44
+  - CD45
+  - CD68
+  - CD8a
+  - CK14
+  - CK5
+  - CK7
+  - CK8-18
+  - DNA1
+  - DNA2
+  - Ecad
+  - EGFR
+  - ER
+  - Fibronectin
+  - GATA3
+  - HER2 (3B5)
+  - Histone H3
+  - Histone H3 - p
+  - Histone H3 k27me3
+  - HLADR
+  - Ki67
+  - mTOR
+  - p53
+  - panCK
+  - PR
+  - pS6
+  - SMA
+  - Vimentin
+  rigamonti_2025:
+  - Arg1
+  - C1Qa
+  - CCR4
+  - CD14
+  - CD16
+  - CD163
+  - CD20
+  - CD3
+  - CD31
+  - CD4
+  - CD45
+  - CD66a
+  - CD68
+  - CD8a
+  - Collagen Type I
+  - CXCL4
+  - DNA1
+  - DNA2
+  - FOXP3
+  - GrzB
+  - HLADR
+  - Ki67
+  - LAMP3
+  - MS4A4A
+  - panCK
+  - S100a8
+  - SMA
+  - Tim3
+  - Vimentin
+  steenbuck-immune:
+  - Arg1
+  - ATP5A
+  - Caveolin-1
+  - CD103
+  - CD11b
+  - CD11c
+  - CD15
+  - CD16
+  - CD163
+  - CD20
+  - CD204
+  - CD206
+  - CD27
+  - CD3
+  - CD303
+  - CD4
+  - CD45RA
+  - CD45RO
+  - CD54
+  - CD56
+  - CD57
+  - CD66b
+  - CD7
+  - CD73
+  - CD8a
+  - Cirate Synthase
+  - DNA1
+  - DNA2
+  - FOXP3
+  - GCG
+  - GrzB
+  - Hexokinase I
+  - Histone H3
+  - HLADR
+  - Insulin
+  - Ki67
+  - LDHA
+  - MPO
+  - NKX6-1
+  - PD1
+  - PDX1
+  - SMA
+  - Somatostatin
+  - SYP
+  - Tim3
+  - TMEM173
+  - Vimentin
   ehret_2025_p1:
   - Arg1
   - beta-Catenin
@@ -341,54 +503,6 @@ markers:
   - Tim3
   - TOX
   - VISTA
-  steenbuck-immune:
-  - Arg1
-  - ATP5A
-  - Caveolin-1
-  - CD103
-  - CD11b
-  - CD11c
-  - CD15
-  - CD16
-  - CD163
-  - CD20
-  - CD204
-  - CD206
-  - CD27
-  - CD3
-  - CD303
-  - CD4
-  - CD45RA
-  - CD45RO
-  - CD54
-  - CD56
-  - CD57
-  - CD66b
-  - CD7
-  - CD73
-  - CD8a
-  - Cirate Synthase
-  - DNA1
-  - DNA2
-  - FOXP3
-  - GCG
-  - GrzB
-  - Hexokinase I
-  - Histone H3
-  - HLADR
-  - Insulin
-  - Ki67
-  - LDHA
-  - MPO
-  - NKX6-1
-  - PD1
-  - PDX1
-  - SMA
-  - Somatostatin
-  - SYP
-  - Tim3
-  - TMEM173
-  - Vimentin
   nsclc2-panel2:
   - Arg1
   - Bcl2
@@ -793,6 +907,96 @@ markers:
   - PP
   - pS6
   - Somatostatin
+  bengsch:
+  - beta-Catenin
+  - CD103
+  - CD15
+  - CD163
+  - CD20
+  - CD204
+  - CD3
+  - CD33
+  - CD34
+  - CD38
+  - CD39
+  - CD4
+  - CD45
+  - CD45RO
+  - CD68
+  - CD69
+  - CD8a
+  - CK7
+  - Collagen Type I
+  - CXCR5
+  - CXCR6
+  - DNA1
+  - DNA2
+  - Ecad
+  - EOMES
+  - FOXP3
+  - GrzB
+  - Histone H3
+  - HLADR
+  - Ki67
+  - LAG3
+  - LYVE1
+  - PD1
+  - PDL1
+  - pERK
+  - S6
+  - SMA
+  - TBET
+  - TCF1
+  - TIGIT
+  - Tim3
+  - TOX
+  hoch-protein:
+  - beta-Catenin
+  - Caveolin-1
+  - CD11b
+  - CD11c
+  - CD15
+  - CD19
+  - CD20
+  - CD206
+  - CD3
+  - CD303
+  - CD36
+  - CD4
+  - CD45
+  - CD45RA
+  - CD45RO
+  - CD68
+  - CD7
+  - CD8a
+  - cl.PARP
+  - Collagen Type I
+  - CXCR2
+  - DNA1
+  - DNA2
+  - FOXP3
+  - GrzB
+  - Histone H3
+  - Histone H3 k27me3
+  - HLADR
+  - ICOS
+  - Ido1
+  - Ki67
+  - Ki67-pt198
+  - MITF
+  - MPO
+  - p75
+  - PD1
+  - PDL1
+  - pERK
+  - pS6
+  - S100B
+  - SMA
+  - Sox10
+  - Sox9
+  - TCF7
+  - TOX
+  - Vimentin
   jackson-basel:
   - beta-Catenin
   - c-Caspase3c-PARP
@@ -873,96 +1077,6 @@ markers:
   - Twist
   - Vimentin
   - vWF
-  hoch-protein:
-  - beta-Catenin
-  - Caveolin-1
-  - CD11b
-  - CD11c
-  - CD15
-  - CD19
-  - CD20
-  - CD206
-  - CD3
-  - CD303
-  - CD38
-  - CD4
-  - CD45
-  - CD45RA
-  - CD45RO
-  - CD68
-  - CD7
-  - CD8a
-  - cl.PARP
-  - Collagen Type I
-  - CXCR2
-  - DNA1
-  - DNA2
-  - FOXP3
-  - GrzB
-  - Histone H3
-  - Histone H3 k27me3
-  - HLADR
-  - ICOS
-  - Ido1
-  - Ki67
-  - Ki67-pt198
-  - MITF
-  - MPO
-  - p75
-  - PD1
-  - PDL1
-  - pERK
-  - pS6
-  - S100B
-  - SMA
-  - Sox10
-  - Sox9
-  - TCF1/7
-  - TOX
-  - Vimentin
-  bengsch:
-  - beta-Catenin
-  - CD103
-  - CD15
-  - CD163
-  - CD20
-  - CD204
-  - CD3
-  - CD33
-  - CD34
-  - CD38
-  - CD39
-  - CD4
-  - CD45
-  - CD45RO
-  - CD68
-  - CD69
-  - CD8a
-  - CK7
-  - Collagen Type I
-  - CXCR5
-  - CXCR6
-  - DNA1
-  - DNA2
-  - Ecad
-  - EOMES
-  - FOXP3
-  - GrzB
-  - Histone H3
-  - HLADR
-  - Ki67
-  - LAG3
-  - LYVE1
-  - PD1
-  - PDL1
-  - pERK
-  - S6
-  - SMA
-  - TBET
-  - TCF1
-  - TIGIT
-  - Tim3
-  - TOX
   cords:
   - Cadherin-11
   - Carbonic Anhydrase
@@ -981,49 +1095,7 @@ markers:
   - CD68
   - CD73
   - CD8a
-  - CXCL12
-  - DNA1
-  - DNA2
-  - FAP
-  - FOXP3
-  - FSP1
-  - Histone H3
-  - HLADR
-  - Ido1
-  - K-Cadherin
-  - Ki67
-  - LYVE1
-  - MMP11
-  - MMP9
-  - MPO
-  - p75
-  - panCK
-  - PD1
-  - PDGFRb
-  - PNAd
-  - Podoplanin
-  - SMA
-  - TCF1/7
-  - VCAM1
-  - Vimentin
-  cords-fibro:
-  - Cadherin-11
-  - Carbonic Anhydrase
-  - Caveolin-1
-  - CCL21
-  - CD10
-  - CD146
-  - CD15
-  - CD20
-  - CD248
-  - CD3
-  - CD31-vWF
-  - CD34
-  - CD4
-  - CD45
-  - CD68
-  - CD73
-  - CD8a
+  - Collagen Type I
   - CXCL12
   - DNA1
   - DNA2
@@ -1080,7 +1152,6 @@ markers:
   - Ki67
   - panCK
   - pCREB
-  - PCSK2
   - pERK
   - pMAPKAPK2
   - pNFkB
