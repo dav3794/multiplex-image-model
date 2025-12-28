@@ -1,12 +1,25 @@
 import torch
 from typing import List, Literal
 from nltk.tree import Tree
+from skdim.id import TwoNN
 
 import torch.nn as nn
 import torch.nn.functional as F
 
 def nll_loss(x, mi, logvar):
     return torch.mean((x - mi)**2 / (torch.exp(logvar) + 1e-8) + logvar)
+
+def RankMe(features):
+    U, S, V = torch.linalg.svd(features)
+    p = S / (S.sum() + 1e-7)
+    entropy = -torch.sum(p * torch.log(p + 1e-7))
+    rank_me = torch.exp(entropy)
+    return rank_me
+
+def intrinsic_dimension(features):
+    id = TwoNN().fit_transform(features)
+    return id
+
 
 class DiceLoss(nn.Module):
     """

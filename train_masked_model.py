@@ -8,6 +8,7 @@ import neptune
 from neptune.utils import stringify_unsupported
 from ruamel.yaml import YAML
 from torch.amp import GradScaler, autocast
+from torch.nn.functional import normalize
 from torch.utils.data import DataLoader
 from torchvision.transforms import Compose
 from torchvision.transforms import RandomRotation, RandomCrop, RandomHorizontalFlip
@@ -15,7 +16,7 @@ from torchvision.transforms.functional import InterpolationMode
 from tqdm import tqdm
 
 from multiplex_model.data import DatasetFromTIFF, PanelBatchSampler, TestCrop
-from multiplex_model.losses import nll_loss
+from multiplex_model.losses import nll_loss, RankMe, intrinsic_dimension
 from multiplex_model.utils import ClampWithGrad, plot_reconstructs_with_masks, get_scheduler_with_warmup
 from multiplex_model.modules import MultiplexAutoencoder
 
@@ -178,6 +179,8 @@ def test_masked(
     plot_indices = set(plot_indices)
     rand_gen = torch.Generator().manual_seed(42)
 
+    all_latents = []
+
     with torch.no_grad():
         for idx, (img, channel_ids, panel_idx, img_path) in enumerate(tqdm(test_dataloader, desc=f'Testing epoch {epoch}')):
             batch_size, num_channels, H, W = img.shape
@@ -205,9 +208,13 @@ def test_masked(
     
             masked_img[pixel_mask] = 0.0  # mask patches by setting to zero
 
-            output = model(masked_img, active_channel_ids, channel_ids)['output']
+            latent = model.encode(masked_img, active_channel_ids)['output']
+            output = model.decode(latent, channel_ids)
             mi, logsigma = output.unbind(dim=-1)
             mi = torch.sigmoid(mi)
+
+            latent = normalize(latent.mean(dim=(2,3)), p=2, dim=1)
+            all_latents.append(latent.cpu())
   
             loss = nll_loss(img, mi, logsigma)
             running_loss += loss.item()
@@ -251,6 +258,13 @@ def test_masked(
     run['val/loss'].append(val_loss)
     run['val/mae'].append(running_mae / len(test_dataloader))
     run['val/mse'].append(running_mse / len(test_dataloader))
+
+    all_latents = torch.cat(all_latents)
+    rankme = RankMe(all_latents)
+    intinsic_dim = intrinsic_dimension(all_latents)
+
+    run['val/latent_RankMe'].append(rankme)
+    run['val/latent_intinsic_dim'].append(intinsic_dim)
     
     return val_loss
 
