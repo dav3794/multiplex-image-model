@@ -1,8 +1,17 @@
 import torch
-from typing import List, Dict, Optional, Type, Literal
+from typing import List, Dict, Literal
 
 import torch.nn as nn
 import torch.nn.functional as F
+
+
+class Identity(nn.Identity):
+    """Identity layer"""
+    def __init__(self, *args, **kwargs):
+        super().__init__(*args, **kwargs)
+    
+    def forward(self, x: torch.Tensor, *args, **kwargs) -> Dict:
+        return {'output': super().forward(x)}
 
 
 class LayerNorm(nn.Module):
@@ -301,6 +310,7 @@ class MultiplexImageEncoder(nn.Module):
             hyperkernel_config: Dict,
             pm_layers_blocks: List[int],
             pm_embedding_dims: List[int],
+            use_hyperkernel_act: bool = True,
     ):
         """Initialize the Multiplex Image Encoder.
 
@@ -311,24 +321,36 @@ class MultiplexImageEncoder(nn.Module):
             hyperkernel_config (Dict): Configuration for the hyperkernel.
             pm_layers_blocks (List[int]): Number of blocks in each pan-marker layer.
             pm_embedding_dims (List[int]): Embedding dimensions for each pan-marker layer.
+            use_hyperkernel_act (bool, optional): Whether to use activation after hyperkernel. Defaults to True.
         """
         super().__init__()
 
         # channel-agnostic part
-        self.marker_agnostic_encoder = ConvNeXtEncoder(
-            input_channels=1,
-            layers_blocks=ma_layers_blocks,
-            embedding_dims=ma_embedding_dims,
-        )
+        if len(ma_layers_blocks) == 0:
+            self.marker_agnostic_encoder = Identity()
+            hyperkernel_input_dim = 1
+        else:
+            self.marker_agnostic_encoder = ConvNeXtEncoder(
+                input_channels=1,
+                layers_blocks=ma_layers_blocks,
+                embedding_dims=ma_embedding_dims,
+                stem=True
+            )
+            hyperkernel_input_dim = ma_embedding_dims[-1]
+        
 
         self.hyperkernel = Hyperkernel(
             num_channels=num_channels,
-            input_dim=ma_embedding_dims[-1],
+            input_dim=hyperkernel_input_dim,
             module_type='encoder',
             **hyperkernel_config
         )
 
-        self.act = nn.GELU()
+        self.use_hyperkernel_act = use_hyperkernel_act
+        if use_hyperkernel_act:
+            self.act = nn.GELU()
+        else:
+            self.act = nn.Identity()
 
         # pan-marker part
         self.pan_marker_encoder = ConvNeXtEncoder(
@@ -387,6 +409,7 @@ class MultiplexImageDecoder(nn.Module):
             scaling_factor: int,
             num_channels: int,
             hyperkernel_config: Dict,
+            num_outputs: int = 2
         ) -> None:
             """
             Args:
@@ -396,12 +419,13 @@ class MultiplexImageDecoder(nn.Module):
                 scaling_factor (int): Scaling factor for the upsampling.
                 num_channels (int): Number of possible output channels/markers.
                 hyperkernel_config (Dict): Configuration for the hyperkernel.
+                num_outputs (int): Number of outputs per pixel
             """
             super().__init__()
             self.scaling_factor = scaling_factor
             self.num_channels = num_channels
             self.decoded_embed_dim = decoded_embed_dim
-            self.num_outputs = 2
+            self.num_outputs = num_outputs
 
             # self.channel_embed = nn.Embedding(num_channels, input_embedding_dim * decoded_embed_dim) # input projection
             self.channel_embed = Hyperkernel(
