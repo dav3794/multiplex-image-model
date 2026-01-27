@@ -1,20 +1,20 @@
 encoder:
     # marker-agnostic part
     ma_layers_blocks: [6,]
-    ma_embedding_dims: [8,]
+    ma_embedding_dims: [16,]
     # pan-marker part
     pm_layers_blocks: [6, 6]
-    pm_embedding_dims: [256, 512]
+    pm_embedding_dims: [384, 768]
 
     hyperkernel_config:
-      embedding_dim: 128
+      embedding_dim: 192
       kernel_size: 1
       padding: 0
       stride: 1
       use_bias: true
 
 decoder:
-  decoded_embed_dim: 384
+  decoded_embed_dim: 512
   num_blocks: 1
 
   hyperkernel_config:
