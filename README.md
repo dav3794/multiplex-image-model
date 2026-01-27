@@ -1,4 +1,6 @@
-# Multiplex image model
+![ImmuVis logo](./imgs/immuvis_logo.png)
+
+# ImmuVis
 
 ## Installation
 

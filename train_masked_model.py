@@ -225,18 +225,7 @@ def test_masked(
                 # uncertainty_img = torch.exp(logsigma)
                 unactive_channels = [i for i in channel_ids[0] if i not in active_channel_ids[0]]
                 masked_channels_names = '\n'.join([marker_names_map[i.item()] for i in unactive_channels])
-                # partially_masked_ids = active_channel_ids[0].tolist()
 
-                # reconstr_img = plot_reconstructs_with_uncertainty(
-                #     img,
-                #     mi,
-                #     uncertainty_img,
-                #     channel_ids,
-                #     unactive_channels,
-                #     markers_names_map=marker_names_map,
-                #     scale_by_max=True,
-                #     partially_masked_ids=partially_masked_ids
-                # )
                 reconstr_img = plot_reconstructs_with_masks(
                     img,
                     mi,
