@@ -161,7 +161,7 @@ def main():
     parser.add_argument('--checkpoint', type=str, required=True)
     parser.add_argument('--model_name', type=str, required=True, help="Short name for files e.g. ViTS")
     parser.add_argument('--output_dir', type=str, required=True)
-    parser.add_argument('--panel_config', type=str, default='/home/jgiezgala/multiplex-image-model/configs/all_panels_config2.yaml')
+    parser.add_argument('--panel_config', type=str, default='/YOUR/PATH/all_panels_config2.yaml')
     args = parser.parse_args()
 
     device = 'cuda' if torch.cuda.is_available() else 'cpu'
@@ -172,14 +172,14 @@ def main():
     model = load_model_from_config(args.config, args.checkpoint, device)
 
     # Dataset
-    tokenizer_path = '/home/jgiezgala/multiplex-image-model/configs/all_markers_tokenizer.yaml'
+    tokenizer_path = '/YOUR/PATH/all_markers_tokenizer.yaml'
     if os.path.exists(tokenizer_path):
         tokenizer = YAML().load(open(tokenizer_path))
     else:
         if os.path.exists('configs/all_markers_tokenizer.yaml'):
             tokenizer = YAML().load(open('configs/all_markers_tokenizer.yaml'))
         else:
-            print(f"Warning: Tokenizer not found at {tokenizer_path} nor locally. Ensure path is correct.")
+            print(f"[WARNING]: Tokenizer not found at {tokenizer_path} nor locally. Ensure path is correct.")
             sys.exit(1)
     
     if os.path.exists(args.panel_config):
