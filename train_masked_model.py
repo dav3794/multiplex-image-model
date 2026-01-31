@@ -1,242 +1,207 @@
 import os
 import sys
+
+import matplotlib.pyplot as plt
 import numpy as np
 import torch
 import torch.optim as optim
-import matplotlib.pyplot as plt
-import neptune
-from neptune.utils import stringify_unsupported
 from ruamel.yaml import YAML
 from torch.amp import GradScaler, autocast
 from torch.nn.functional import normalize
 from torch.utils.data import DataLoader
-from torchvision.transforms import Compose
-from torchvision.transforms import RandomRotation, RandomCrop, RandomHorizontalFlip
+from torchvision.transforms import Compose, RandomCrop, RandomHorizontalFlip, RandomRotation
 from torchvision.transforms.functional import InterpolationMode
 from tqdm import tqdm
 
 from multiplex_model.data import DatasetFromTIFF, PanelBatchSampler, TestCrop
-from multiplex_model.losses import nll_loss, RankMe, intrinsic_dimension
-from multiplex_model.utils import ClampWithGrad, plot_reconstructs_with_masks, get_scheduler_with_warmup
+from multiplex_model.losses import RankMe, beta_nll_loss, intrinsic_dimension, nll_loss
 from multiplex_model.modules import MultiplexAutoencoder
+from multiplex_model.utils import (
+    TrainingConfig,
+    apply_channel_masking,
+    apply_spatial_masking,
+    build_wandb_config,
+    finish_wandb_run,
+    get_run_name,
+    get_scheduler_with_warmup,
+    init_wandb_run,
+    log_training_metrics,
+    log_validation_images,
+    log_validation_metrics,
+    plot_reconstructs_with_masks,
+)
+
 
 def train_masked(
-        model, 
-        optimizer,
-        scheduler,
-        train_dataloader, 
-        val_dataloader, 
-        device, 
-        run,
-        marker_names_map,
-        epochs=10, 
-        gradient_accumulation_steps=1,
-        min_channels_frac=0.75,
-        fully_masked_channels_max_frac=0.5,
-        spatial_masking_ratio=0.6,
-        mask_patch_size=8,
-        start_epoch=0,
-        save_checkpoint_every=5,
-        checkpoints_path='checkpoints'
-    ):
+    model,
+    optimizer,
+    scheduler,
+    train_dataloader,
+    val_dataloader,
+    device,
+    marker_names_map,
+    epochs=10,
+    gradient_accumulation_steps=1,
+    beta=1.0,
+    min_channels_frac=0.75,
+    fully_masked_channels_max_frac=0.5,
+    spatial_masking_ratio=0.6,
+    mask_patch_size=8,
+    start_epoch=0,
+    save_checkpoint_every=5,
+    checkpoints_path="checkpoints",
+):
     """Train a masked autoencoder (decode the remaining channels) with the given parameters."""
     model.train()
     scaler = GradScaler()
-    run_name = run['sys/name'].fetch()
+    run_name = get_run_name()
 
     if not os.path.exists(checkpoints_path):
         os.makedirs(checkpoints_path, exist_ok=True)
-        print(f'Created checkpoints directory at {checkpoints_path}')
+        print(f"Created checkpoints directory at {checkpoints_path}")
 
     for epoch in range(start_epoch, epochs):
         model.train()
-        for batch_idx, (img, channel_ids, panel_idx, img_path) in enumerate(tqdm(train_dataloader, desc=f'Epoch {epoch}')):
-            batch_size, num_channels, H, W = img.shape
+        for batch_idx, (img, channel_ids, panel_idx, img_path) in enumerate(
+            tqdm(train_dataloader, desc=f"Epoch {epoch}")
+        ):
             img = img.to(device, dtype=torch.float32)
             channel_ids = channel_ids.to(device, dtype=torch.long)
 
-            # Randomly sample a subset of channels to keep
-            min_channels = int(np.ceil(num_channels * min_channels_frac))
-            num_sampled_channels = np.random.randint(min_channels, num_channels+1)
+            # Apply channel masking with channel subset sampling
+            img, channel_ids, masked_img, active_channel_ids = apply_channel_masking(
+                img,
+                channel_ids,
+                min_channels_frac,
+                fully_masked_channels_max_frac,
+                apply_channel_subset_sampling=True,
+            )
 
-            if num_sampled_channels < num_channels:
-                new_img = []
-                new_channel_ids = []
-                for b_i in range(batch_size):
-                    channels_subset_idx = torch.randperm(num_channels)[:num_sampled_channels]
-                    new_img.append(img[b_i:b_i+1, channels_subset_idx, :, :])
-                    new_channel_ids.append(channel_ids[b_i:b_i+1, channels_subset_idx])
-                img = torch.cat(new_img, dim=0)
-                channel_ids = torch.cat(new_channel_ids, dim=0)
+            # Apply spatial masking
+            masked_img, _ = apply_spatial_masking(masked_img, spatial_masking_ratio, mask_patch_size)
 
-
-            # sample full channels to mask (drop)
-            max_channels_to_mask = int(np.ceil(num_sampled_channels * fully_masked_channels_max_frac))
-            num_channels_to_mask = np.random.randint(1, max_channels_to_mask + 1)
-            masked_img = []
-            active_channel_ids = []
-            for b_i in range(batch_size):
-                channels_to_keep = torch.randperm(num_sampled_channels)[num_channels_to_mask:]
-                masked_img.append(img[b_i:b_i+1, channels_to_keep, :, :])
-                active_channel_ids.append(channel_ids[b_i:b_i+1, channels_to_keep])
-            masked_img = torch.cat(masked_img, dim=0) # [B, C_new, H, W]
-            active_channel_ids = torch.cat(active_channel_ids, dim=0) # [B, C_new]
-            num_active_channels = masked_img.shape[1]
-
-            # randomly mask spatial_masking_ratio image patches
-            h = w = H // mask_patch_size
-            mask = torch.rand((batch_size, num_active_channels, h, w), device=masked_img.device)
-            mask = mask <= spatial_masking_ratio
-            pixel_mask = mask.repeat_interleave(mask_patch_size, dim=2).repeat_interleave(mask_patch_size, dim=3)
-    
-            masked_img[pixel_mask] = 0.0  # mask patches by setting to zero
-
-            with autocast(device_type='cuda', dtype=torch.bfloat16):
-                output = model(masked_img, active_channel_ids, channel_ids)['output']
-                mi, logsigma = output.unbind(dim=-1)
+            with autocast(device_type="cuda", dtype=torch.bfloat16):
+                output = model(masked_img, active_channel_ids, channel_ids)["output"]
+                mi, logvar = output.unbind(dim=-1)
                 mi = torch.sigmoid(mi)
 
-                # Apply ClampWithGrad to logsigma for stability
-                logsigma = ClampWithGrad.apply(logsigma, -15.0, 15.0)
-                loss = nll_loss(img, mi, logsigma)
-
-                # sanity check if loss is finite
-                if not torch.isfinite(loss):
-                    print(f'Non-finite loss encountered at batch {batch_idx} in epoch {epoch}. Skipping batch.')
-                    print(f'Dataset: {panel_idx}')
-                    print(f'Image path: {img_path}')
-                    print(f'Mi: {mi}, Logsigma: {logsigma}')
-                    assert False, "Non-finite loss encountered. Check the model and data."
+                loss = beta_nll_loss(img, mi, logvar, beta=beta)
 
             scaler.scale(loss / gradient_accumulation_steps).backward()
-            # scaler.scale(loss).backward()
 
-            if (batch_idx+1) % gradient_accumulation_steps == 0:
+            if (batch_idx + 1) % gradient_accumulation_steps == 0:
                 scaler.unscale_(optimizer)
                 torch.nn.utils.clip_grad_norm_(model.parameters(), max_norm=1.0)
                 scaler.step(optimizer)
                 scaler.update()
                 optimizer.zero_grad()
                 scheduler.step()
-                run['train/loss'].append(loss.item())
-                run['train/lr'].append(scheduler.get_last_lr()[0])
-                run['train/µ'].append(mi.mean().item())
-                run['train/logvar'].append(logsigma.mean().item())
-                run['train/mae'].append(torch.abs(img - mi).mean().item())
-                run['train/mse'].append(torch.square(img - mi).mean().item())
 
+                log_training_metrics(
+                    loss=loss.item(),
+                    lr=scheduler.get_last_lr()[0],
+                    mu=mi.mean().item(),
+                    logvar=logvar.mean().item(),
+                    mae=torch.abs(img - mi).mean().item(),
+                    mse=torch.square(img - mi).mean().item(),
+                )
 
         val_loss = test_masked(
-            model, 
-            val_dataloader, 
-            device, 
-            run, 
-            epoch, 
+            model,
+            val_dataloader,
+            device,
+            epoch,
             spatial_masking_ratio=spatial_masking_ratio,
             fully_masked_channels_max_frac=fully_masked_channels_max_frac,
             mask_patch_size=mask_patch_size,
             marker_names_map=marker_names_map,
         )
-        print(f'Validation loss: {val_loss:.4f}')
+        print(f"Validation loss: {val_loss:.4f}")
 
+        checkpoint = {
+            "model_state_dict": model.state_dict(),
+            "optimizer_state_dict": optimizer.state_dict(),
+            "scheduler_state_dict": scheduler.state_dict(),
+            "epoch": epoch,
+        }
         if (epoch + 1) % save_checkpoint_every == 0:
-            checkpoint = {
-                'model_state_dict': model.state_dict(),
-                'optimizer_state_dict': optimizer.state_dict(),
-                'scheduler_state_dict': scheduler.state_dict(),
-                'epoch': epoch,
-            }
-            torch.save(checkpoint, f'{checkpoints_path}/checkpoint-{run_name}-epoch_{epoch}.pth')
+            torch.save(
+                checkpoint,
+                f"{checkpoints_path}/checkpoint-{run_name}-epoch_{epoch}.pth",
+            )
+        torch.save(checkpoint, f"{checkpoints_path}/last_checkpoint-{run_name}.pth")
 
-    final_model_path = f'{checkpoints_path}/final_model-{run_name}.pth'
-    print(f'Training completed. Saving final model at {final_model_path}...')
+    final_model_path = f"{checkpoints_path}/final_model-{run_name}.pth"
+    print(f"Training completed. Saving final model at {final_model_path}...")
     checkpoint = {
-        'model_state_dict': model.state_dict(),
-        'optimizer_state_dict': optimizer.state_dict(),
-        'scheduler_state_dict': scheduler.state_dict(),
-        'epoch': epochs,
+        "model_state_dict": model.state_dict(),
     }
     torch.save(checkpoint, final_model_path)
 
 
 def test_masked(
-        model,  
-        test_dataloader, 
-        device, 
-        run, 
-        epoch,
-        marker_names_map,
-        num_plots=5, 
-        spatial_masking_ratio=0.6,
-        fully_masked_channels_max_frac=0.5,
-        mask_patch_size=8,
-        ):
+    model,
+    test_dataloader,
+    device,
+    epoch,
+    marker_names_map,
+    num_plots=5,
+    spatial_masking_ratio=0.6,
+    fully_masked_channels_max_frac=0.5,
+    mask_patch_size=8,
+):
     model.eval()
     running_loss = 0.0
     running_mae = 0.0
     running_mse = 0.0
     plot_indices = np.random.choice(np.arange(len(test_dataloader)), size=num_plots, replace=False)
     plot_indices = set(plot_indices)
-    rand_gen = torch.Generator().manual_seed(42)
 
     all_latents = []
+    all_channel_variances = []
+    all_channel_maes = []
 
     with torch.no_grad():
-        for idx, (img, channel_ids, panel_idx, img_path) in enumerate(tqdm(test_dataloader, desc=f'Testing epoch {epoch}')):
-            batch_size, num_channels, H, W = img.shape
+        for idx, (img, channel_ids, panel_idx, img_path) in enumerate(
+            tqdm(test_dataloader, desc=f"Testing epoch {epoch}")
+        ):
             img = img.to(device, dtype=torch.float32)
             channel_ids = channel_ids.to(device, dtype=torch.long)
 
-            # sample full channels to mask (drop)
-            max_channels_to_mask = int(np.ceil(num_channels * fully_masked_channels_max_frac))
-            num_channels_to_mask = np.random.randint(1, max_channels_to_mask + 1)
-            masked_img = []
-            active_channel_ids = []
-            for b_i in range(batch_size):
-                channels_to_keep = torch.randperm(num_channels)[num_channels_to_mask:]
-                masked_img.append(img[b_i:b_i+1, channels_to_keep, :, :])
-                active_channel_ids.append(channel_ids[b_i:b_i+1, channels_to_keep])
-            masked_img = torch.cat(masked_img, dim=0) # [B, C_new, H, W]
-            active_channel_ids = torch.cat(active_channel_ids, dim=0) # [B, C_new]
-            num_active_channels = masked_img.shape[1]
+            # Apply channel masking (only full channel masking for validation, no channel dropping)
+            _, _, masked_img, active_channel_ids = apply_channel_masking(
+                img,
+                channel_ids,
+                fully_masked_channels_max_frac=fully_masked_channels_max_frac,
+                apply_channel_subset_sampling=False,
+            )
 
-            # randomly mask spatial_masking_ratio image patches
-            h = w = H // mask_patch_size
-            mask = torch.rand((batch_size, num_active_channels, h, w), device=masked_img.device)
-            mask = mask <= spatial_masking_ratio
-            pixel_mask = mask.repeat_interleave(mask_patch_size, dim=2).repeat_interleave(mask_patch_size, dim=3)
-    
-            masked_img[pixel_mask] = 0.0  # mask patches by setting to zero
+            # Apply spatial masking
+            masked_img, pixel_mask = apply_spatial_masking(masked_img, spatial_masking_ratio, mask_patch_size)
 
-            latent = model.encode(masked_img, active_channel_ids)['output']
+            latent = model.encode(masked_img, active_channel_ids)["output"]
             output = model.decode(latent, channel_ids)
-            mi, logsigma = output.unbind(dim=-1)
+            mi, logvar = output.unbind(dim=-1)
             mi = torch.sigmoid(mi)
 
-            latent = normalize(latent.mean(dim=(2,3)), p=2, dim=1)
+            latent = normalize(latent.mean(dim=(2, 3)), p=2, dim=1)
             all_latents.append(latent.cpu())
-  
-            loss = nll_loss(img, mi, logsigma)
+
+            # Accumulate per-channel statistics for correlation analysis
+            variance_per_channel = torch.exp(logvar).mean(dim=(0, 2, 3))  # Mean variance per channel
+            mae_per_channel = torch.abs(img - mi).mean(dim=(0, 2, 3))  # MAE per channel
+            all_channel_variances.append(variance_per_channel.cpu())
+            all_channel_maes.append(mae_per_channel.cpu())
+
+            loss = nll_loss(img, mi, logvar)
             running_loss += loss.item()
             running_mae += torch.abs(img - mi).mean().item()
             running_mse += torch.square(img - mi).mean().item()
 
             if idx in plot_indices:
-                # uncertainty_img = torch.exp(logsigma)
                 unactive_channels = [i for i in channel_ids[0] if i not in active_channel_ids[0]]
-                masked_channels_names = '\n'.join([marker_names_map[i.item()] for i in unactive_channels])
-                # partially_masked_ids = active_channel_ids[0].tolist()
+                masked_channels_names = "\n".join([marker_names_map[i.item()] for i in unactive_channels])
 
-                # reconstr_img = plot_reconstructs_with_uncertainty(
-                #     img,
-                #     mi,
-                #     uncertainty_img,
-                #     channel_ids,
-                #     unactive_channels,
-                #     markers_names_map=marker_names_map,
-                #     scale_by_max=True,
-                #     partially_masked_ids=partially_masked_ids
-                # )
                 reconstr_img = plot_reconstructs_with_masks(
                     img,
                     mi,
@@ -244,183 +209,176 @@ def test_masked(
                     channel_ids,
                     unactive_channels,
                     markers_names_map=marker_names_map,
-                    ncols=9
+                    ncols=9,
                 )
-                run['val/imgs'].append(
-                    reconstr_img, 
-                    description=f'Resulting outputs  (dataset {panel_idx[0]}, image {img_path[0]}, epoch {epoch+1})'
-                                '\n\nMasked channels: {}'.format(masked_channels_names)
+                log_validation_images(
+                    fig=reconstr_img,
+                    panel_idx=panel_idx[0],
+                    img_path=img_path[0],
+                    epoch=epoch,
+                    masked_channels_names=masked_channels_names,
                 )
-                plt.close('all')
-                
-    
+                plt.close("all")
+
     val_loss = running_loss / len(test_dataloader)
-    run['val/loss'].append(val_loss)
-    run['val/mae'].append(running_mae / len(test_dataloader))
-    run['val/mse'].append(running_mse / len(test_dataloader))
+    val_mae = running_mae / len(test_dataloader)
+    val_mse = running_mse / len(test_dataloader)
 
     all_latents = torch.cat(all_latents)
     rankme = RankMe(all_latents)
     intinsic_dim = intrinsic_dimension(all_latents)
 
-    run['val/latent_RankMe'].append(rankme)
-    run['val/latent_intinsic_dim'].append(intinsic_dim)
-    
+    # Calculate Pearson correlation between predicted variances and MAEs per channel
+    all_channel_variances = torch.cat(all_channel_variances)
+    all_channel_maes = torch.cat(all_channel_maes)
+    # Calculate Pearson correlation using flattened data across all batches
+    variance_mae_corr = torch.corrcoef(torch.stack([all_channel_variances.flatten(), all_channel_maes.flatten()]))[
+        0, 1
+    ].item()
+
+    log_validation_metrics(
+        val_loss=val_loss,
+        val_mae=val_mae,
+        val_mse=val_mse,
+        latent_rankme=rankme,
+        latent_intrinsic_dim=intinsic_dim,
+        epoch=epoch,
+        variance_mae_correlation=variance_mae_corr,
+    )
+
     return val_loss
 
-if __name__ == '__main__':
+
+if __name__ == "__main__":
     # Load the configuration file
     config_path = sys.argv[1]
-    yaml = YAML(typ='safe')
-    with open(config_path, 'r') as f:
-        config = yaml.load(f)
+    yaml = YAML(typ="safe")
+    with open(config_path, "r") as f:
+        raw_config = yaml.load(f)
 
+    # Validate configuration using Pydantic model
+    config = TrainingConfig(**raw_config)
 
-    device = config['device']
-    print(f'Using device: {device}')
+    device = config.device
+    print(f"Using device: {device}")
 
-    SIZE = config['input_image_size']
-    BATCH_SIZE = config['batch_size']
-    NUM_WORKERS = config['num_workers']
+    SIZE = [config.image_size, config.image_size]
+    BATCH_SIZE = config.batch_size
+    NUM_WORKERS = config.num_workers
 
-    PANEL_CONFIG = YAML().load(open(config['panel_config']))
-    TOKENIZER = YAML().load(open(config['tokenizer_config']))
+    PANEL_CONFIG = YAML().load(open(config.panel_config))
+    TOKENIZER = YAML().load(open(config.tokenizer_config))
     INV_TOKENIZER = {v: k for k, v in TOKENIZER.items()}
 
-    train_transform = Compose([
-        RandomRotation(
-            180, 
-            interpolation=InterpolationMode.BILINEAR
-        ),
-        RandomCrop(SIZE),
-        RandomHorizontalFlip(),
-    ])
+    train_transform = Compose(
+        [
+            RandomRotation(180, interpolation=InterpolationMode.BILINEAR),
+            RandomCrop(SIZE),
+            RandomHorizontalFlip(),
+        ]
+    )
 
     test_transform = TestCrop(SIZE[0])
 
     train_dataset = DatasetFromTIFF(
         panels_config=PANEL_CONFIG,
-        split='train',
+        split="train",
         marker_tokenizer=TOKENIZER,
         transform=train_transform,
-        use_preprocessing=False, # saved data is already preprocessed
+        use_preprocessing=False,  # saved data is already preprocessed
         use_median_denoising=False,
         use_butterworth_filter=True,
         use_minmax_normalization=False,
         use_clip_normalization=True,
-        file_extension='npy'
+        file_extension="npy",
     )
 
     test_dataset = DatasetFromTIFF(
         panels_config=PANEL_CONFIG,
-        split='test',
+        split="test",
         marker_tokenizer=TOKENIZER,
         transform=test_transform,
-        use_preprocessing=False, # saved data is already preprocessed
+        use_preprocessing=False,  # saved data is already preprocessed
         use_median_denoising=False,
         use_butterworth_filter=True,
         use_minmax_normalization=False,
         use_clip_normalization=True,
-        file_extension='npy'
+        file_extension="npy",
     )
 
     train_batch_sampler = PanelBatchSampler(train_dataset, BATCH_SIZE)
     test_batch_sampler = PanelBatchSampler(test_dataset, BATCH_SIZE, shuffle=False)
 
     train_dataloader = DataLoader(
-        train_dataset, 
-        batch_sampler=train_batch_sampler, 
-        num_workers=NUM_WORKERS, 
-        pin_memory=True, 
+        train_dataset,
+        batch_sampler=train_batch_sampler,
+        num_workers=NUM_WORKERS,
+        pin_memory=True,
         persistent_workers=True,
-        prefetch_factor=4
+        prefetch_factor=4,
     )
     test_dataloader = DataLoader(
-        test_dataset, 
-        batch_sampler=test_batch_sampler, 
-        num_workers=NUM_WORKERS, 
-        pin_memory=True, 
+        test_dataset,
+        batch_sampler=test_batch_sampler,
+        num_workers=NUM_WORKERS,
+        pin_memory=True,
         persistent_workers=True,
-        prefetch_factor=4
+        prefetch_factor=4,
     )
 
+    # Build model configuration
+    num_channels = len(TOKENIZER)
+    model = MultiplexAutoencoder(num_channels=num_channels, **config.model_config.dict()).to(device)
 
-    model_config = {
-        'num_channels': len(TOKENIZER),
-        'encoder_config': config['encoder'],
-        'decoder_config': config['decoder'],
-    }
-
-    model = MultiplexAutoencoder(**model_config).to(device)
-
-    lr = config['lr']
-    final_lr = config['final_lr']
-    weight_decay = config['weight_decay']
-    gradient_accumulation_steps = config['gradient_accumulation_steps']
-    epochs = config['epochs']
-    frac_warmup_steps = config['frac_warmup_steps']
-    total_steps = len(train_dataloader) * epochs // gradient_accumulation_steps
-    num_warmup_steps = int(total_steps * frac_warmup_steps)
+    # Setup optimizer and scheduler
+    total_steps = len(train_dataloader) * config.epochs // config.gradient_accumulation_steps
+    num_warmup_steps = int(total_steps * config.frac_warmup_steps)
     num_annealing_steps = total_steps - num_warmup_steps
 
-    optimizer = optim.AdamW(model.parameters(), lr=lr, weight_decay=weight_decay)
-    scheduler = get_scheduler_with_warmup(optimizer, num_warmup_steps, num_annealing_steps, final_lr=final_lr, base_lr=lr, type='cosine')
-
-    if 'from_checkpoint' in config and config['from_checkpoint']:
-        print(f'Loading model from checkpoint: {config["from_checkpoint"]}')
-        checkpoint = torch.load(config['from_checkpoint'], map_location=device)
-        model.load_state_dict(checkpoint['model_state_dict'])
-        optimizer.load_state_dict(checkpoint['optimizer_state_dict'])
-        scheduler.load_state_dict(checkpoint['scheduler_state_dict'])
-        start_epoch = checkpoint['epoch'] + 1
-    else:
-        start_epoch = 0
-
-    min_channels_frac = config['min_channels_frac']
-    spatial_masking_ratio = config['spatial_masking_ratio']
-    fully_masked_channels_max_frac = config['fully_masked_channels_max_frac']
-    mask_patch_size = config['mask_patch_size']
-
-    run = neptune.init_run(
-        project=config['neptune_project'],
-        api_token=config['neptune_api_token'],
-        tags=config['tags'],
+    optimizer = optim.AdamW(model.parameters(), lr=config.peak_lr, weight_decay=config.weight_decay)
+    scheduler = get_scheduler_with_warmup(
+        optimizer,
+        num_warmup_steps,
+        num_annealing_steps,
+        final_lr=config.final_lr,
+        peak_lr=config.peak_lr,
+        type="cosine",
     )
 
-    run["parameters"] = {
-        "batch_size": BATCH_SIZE,
-        "num_workers": NUM_WORKERS,
-        "lr": lr,
-        "weight_decay": weight_decay,
-        "gradient_accumulation_steps": gradient_accumulation_steps,
-        "epochs": epochs,
-        "num_warmup_steps": num_warmup_steps,
-        "num_annealing_steps": num_annealing_steps,
-        "model_config": stringify_unsupported(model_config),
-        "from_checkpoint": config.get('from_checkpoint', None),
-        "min_channels_frac": min_channels_frac,
-        "spatial_masking_ratio": spatial_masking_ratio,
-        "fully_masked_channels_max_frac": fully_masked_channels_max_frac,
-        "mask_patch_size": mask_patch_size,
-    }
+    # Build wandb config
+    wandb_config = build_wandb_config(config, num_channels, num_warmup_steps, num_annealing_steps)
 
+    # Initialize wandb
+    init_wandb_run(wandb_config)
+
+    # Load checkpoint if specified
+    start_epoch = 0
+    if config.resolve_checkpoint():
+        print(f"Loading model from checkpoint: {config.from_checkpoint}")
+        checkpoint = torch.load(config.from_checkpoint, map_location=device)
+        model.load_state_dict(checkpoint["model_state_dict"])
+        optimizer.load_state_dict(checkpoint["optimizer_state_dict"])
+        scheduler.load_state_dict(checkpoint["scheduler_state_dict"])
+        start_epoch = checkpoint["epoch"] + 1
+
+    # Train the model
     train_masked(
-        model, 
-        optimizer, 
+        model,
+        optimizer,
         scheduler,
-        train_dataloader, 
-        test_dataloader, 
-        device, 
-        epochs=epochs, 
-        start_epoch=start_epoch,
-        gradient_accumulation_steps=gradient_accumulation_steps,
-        run=run,
-        min_channels_frac=min_channels_frac,
-        spatial_masking_ratio=spatial_masking_ratio,
-        fully_masked_channels_max_frac=fully_masked_channels_max_frac,
-        mask_patch_size=mask_patch_size,
-        save_checkpoint_every=config['save_checkpoint_freq'],
+        train_dataloader,
+        test_dataloader,
+        device,
         marker_names_map=INV_TOKENIZER,
+        epochs=config.epochs,
+        start_epoch=start_epoch,
+        gradient_accumulation_steps=config.gradient_accumulation_steps,
+        min_channels_frac=config.min_channels_frac,
+        spatial_masking_ratio=config.spatial_masking_ratio,
+        fully_masked_channels_max_frac=config.fully_masked_channels_max_frac,
+        mask_patch_size=config.mask_patch_size,
+        save_checkpoint_every=config.save_checkpoint_freq,
+        checkpoints_path=config.checkpoints_dir,
     )
 
-    run.stop()
+    finish_wandb_run()
