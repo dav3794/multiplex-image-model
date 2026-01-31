@@ -32,7 +32,9 @@ class LayerNorm(nn.Module):
 
     def forward(self, x):
         if self.data_format == "channels_last":
-            return F.layer_norm(x, self.normalized_shape, self.weight, self.bias, self.eps)
+            return F.layer_norm(
+                x, self.normalized_shape, self.weight, self.bias, self.eps
+            )
         elif self.data_format == "channels_first":
             u = x.mean(1, keepdim=True)
             s = (x - u).pow(2).mean(1, keepdim=True)
@@ -72,12 +74,18 @@ class ConvNextBlock(nn.Module):
     ):
         super().__init__()
         inter_dim = inter_dim or dim * 4
-        self.conv1 = nn.Conv2d(dim, dim, kernel_size=kernel_size, padding=padding, groups=dim)
+        self.conv1 = nn.Conv2d(
+            dim, dim, kernel_size=kernel_size, padding=padding, groups=dim
+        )
         self.ln = nn.LayerNorm(dim)
-        self.conv2 = nn.Linear(dim, inter_dim)  # equivalent to nn.Conv2d(dim, inter_dim, kernel_size=1)
+        self.conv2 = nn.Linear(
+            dim, inter_dim
+        )  # equivalent to nn.Conv2d(dim, inter_dim, kernel_size=1)
         self.act = nn.GELU()
         self.grn = GlobalResponseNormalization(inter_dim)
-        self.conv3 = nn.Linear(inter_dim, dim)  # equivalent to nn.Conv2d(inter_dim, dim, kernel_size=1)
+        self.conv3 = nn.Linear(
+            inter_dim, dim
+        )  # equivalent to nn.Conv2d(inter_dim, dim, kernel_size=1)
 
     def forward(self, x: torch.Tensor) -> torch.Tensor:
         # B, C, H, W = x.shape
@@ -143,7 +151,9 @@ class ConvNeXtEncoder(nn.Module):
 
         self.blocks = nn.ModuleList()
         for blocks, dim in zip(layers_blocks, embedding_dims):
-            self.blocks.append(nn.Sequential(*[ConvNextBlock(dim) for _ in range(blocks)]))
+            self.blocks.append(
+                nn.Sequential(*[ConvNextBlock(dim) for _ in range(blocks)])
+            )
 
     def forward(self, x: torch.Tensor, return_features: bool = False) -> Dict:
         """Forward pass of the ConvNeXT.
@@ -215,7 +225,9 @@ class Hyperkernel(nn.Module):
         self.use_bias = use_bias
         if use_bias:
             if module_type == "encoder":
-                self.hyperkernel_bias = nn.Parameter(torch.zeros(1, self.embedding_dim, 1, 1))
+                self.hyperkernel_bias = nn.Parameter(
+                    torch.zeros(1, self.embedding_dim, 1, 1)
+                )
             else:
                 self.hyperkernel_bias = nn.Embedding(num_channels, self.embedding_dim)
 
@@ -253,9 +265,13 @@ class Hyperkernel(nn.Module):
 
             if self.layer_type == "conv":
                 # treat batch as group for conv
-                weights = weights.transpose(1, 2).reshape(B * E, CI, K, K)  # (B*E, C*I, K, K)
+                weights = weights.transpose(1, 2).reshape(
+                    B * E, CI, K, K
+                )  # (B*E, C*I, K, K)
                 x = x.reshape(1, B * CI, *spatial_shape)  # (1, B*C*I, H, W)
-                x = F.conv2d(x, weights, padding=self.padding, stride=self.stride, groups=B)
+                x = F.conv2d(
+                    x, weights, padding=self.padding, stride=self.stride, groups=B
+                )
                 x = x.reshape(B, E, *spatial_shape)  # (B, E, H, W)
             else:
                 x = torch.einsum("bchw, bce -> behw", x, weights)
@@ -270,10 +286,14 @@ class Hyperkernel(nn.Module):
                 x = x.reshape(1, B * C * I, *spatial_shape)  # (1, B*C*I, H, W)
 
                 weights = (
-                    weights.reshape(B * C, I, E, K, K).transpose(1, 2).reshape(B * C * E, I, K, K)
+                    weights.reshape(B * C, I, E, K, K)
+                    .transpose(1, 2)
+                    .reshape(B * C * E, I, K, K)
                 )  # (B*C*E, I, K, K)
 
-                x = F.conv2d(x, weights, padding=self.padding, stride=self.stride, groups=B * C)
+                x = F.conv2d(
+                    x, weights, padding=self.padding, stride=self.stride, groups=B * C
+                )
                 x = x.reshape(B, C, E, *spatial_shape)  # (B, C, E, H, W)
 
             else:
@@ -281,7 +301,9 @@ class Hyperkernel(nn.Module):
 
             if self.use_bias:
                 channel_biases = self.hyperkernel_bias(indices)  # [B, C, E]
-                channel_biases = channel_biases.unsqueeze(-1).unsqueeze(-1)  # [B, C, E, 1, 1]
+                channel_biases = channel_biases.unsqueeze(-1).unsqueeze(
+                    -1
+                )  # [B, C, E, 1, 1]
                 x = x + channel_biases
 
         return x
@@ -429,7 +451,9 @@ class MultiplexImageDecoder(nn.Module):
                 for _ in range(num_blocks)
             ]
         )
-        self.pred = nn.Conv2d(decoded_embed_dim, scaling_factor**2 * self.num_outputs, kernel_size=1)
+        self.pred = nn.Conv2d(
+            decoded_embed_dim, scaling_factor**2 * self.num_outputs, kernel_size=1
+        )
 
     def forward(self, x: torch.Tensor, indices: torch.Tensor) -> torch.Tensor:
         """Forward pass of the Multiplex Image Decoder.
@@ -480,9 +504,13 @@ class MultiplexAutoencoder(nn.Module):
         self.latent_dim = encoder_config["pm_embedding_dims"][-1]
         self.num_channels = num_channels
 
-        self.encoder = MultiplexImageEncoder(num_channels=self.num_channels, **encoder_config)
+        self.encoder = MultiplexImageEncoder(
+            num_channels=self.num_channels, **encoder_config
+        )
 
-        scaling_factor = 2 ** len(encoder_config["ma_layers_blocks"] + encoder_config["pm_layers_blocks"][:-1])
+        scaling_factor = 2 ** len(
+            encoder_config["ma_layers_blocks"] + encoder_config["pm_layers_blocks"][:-1]
+        )
         self.decoder = MultiplexImageDecoder(
             input_embedding_dim=self.latent_dim,
             scaling_factor=scaling_factor,
@@ -506,7 +534,9 @@ class MultiplexAutoencoder(nn.Module):
         Returns:
             Dict: A dictionary containing the encoded images tensor (under 'output') and optionally the features.
         """
-        encoding_output = self.encoder(x, encoded_indices, return_features=return_features)
+        encoding_output = self.encoder(
+            x, encoded_indices, return_features=return_features
+        )
         outputs = {"output": encoding_output["output"]}
 
         if return_features:
@@ -549,7 +579,9 @@ class MultiplexAutoencoder(nn.Module):
         Returns:
             Dict: A dictionary containing the reconstructed images tensor (under 'output') and optionally the features.
         """
-        encoding_output = self.encode(x, encoded_indices, return_features=return_features)
+        encoding_output = self.encode(
+            x, encoded_indices, return_features=return_features
+        )
         x = encoding_output["output"]
         x = self.decode(x, decoded_indices)
         outputs = {"output": x}

@@ -60,7 +60,9 @@ def plot_reconstructs_with_uncertainty(
             ax_img.imshow(orig_img[0, j].cpu().numpy(), cmap="CMRmap", vmin=0, vmax=1)
             ax_img.set_title(f"Original\n{marker_name}")
 
-            ax_reconstructed.imshow(reconstructed_img[0, j].cpu().numpy(), cmap="CMRmap", vmin=0, vmax=1)
+            ax_reconstructed.imshow(
+                reconstructed_img[0, j].cpu().numpy(), cmap="CMRmap", vmin=0, vmax=1
+            )
             is_masked = channel_ids[0, j].item() in masked_ids
             is_partially_masked = channel_ids[0, j].item() in partially_masked_ids
             if is_partially_masked:
@@ -121,7 +123,9 @@ def plot_reconstructs_with_masks(
     ax_flat = axs.flatten()
 
     # Create mapping from channel_id to index in masked_img
-    active_channel_ids = [cid for cid in channel_ids[0].tolist() if cid not in fully_masked_ids]
+    active_channel_ids = [
+        cid for cid in channel_ids[0].tolist() if cid not in fully_masked_ids
+    ]
     channel_to_masked_idx = {cid: idx for idx, cid in enumerate(active_channel_ids)}
 
     for i in range(0, len(ax_flat), 3):
@@ -187,7 +191,9 @@ def plot_reconstructs_with_masks(
                     spine.set_visible(True)
 
             # Show reconstruction
-            ax_reconstructed.imshow(reconstructed_img[0, j].cpu().numpy(), cmap="CMRmap", vmin=0, vmax=1)
+            ax_reconstructed.imshow(
+                reconstructed_img[0, j].cpu().numpy(), cmap="CMRmap", vmin=0, vmax=1
+            )
             ax_reconstructed.set_title(f"Reconstructed\n{marker_name}")
             ax_reconstructed.set_xticks([])
             ax_reconstructed.set_yticks([])

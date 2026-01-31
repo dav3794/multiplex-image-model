@@ -45,14 +45,25 @@ class DatasetFromTIFF(Dataset):
             use_global_clip_limits (bool, optional): Whether to use global clip limits for all datasets. Defaults to False.
             file_extension (Literal['tiff', 'npy'], optional): File extension of the images. Defaults to 'tiff'.
         """
-        assert "paths" in panels_config, "Panels config must have 'paths' attribute with paths of splits of the data."
-        assert split in panels_config["paths"], f"Panels config must have '{split}' attribute with data path."
-        assert "datasets" in panels_config, "Panels config must have 'datasets' attribute with subdirectories."
-        assert "markers" in panels_config, "Panels config must have 'markers' attribute with channel IDs."
+        assert (
+            "paths" in panels_config
+        ), "Panels config must have 'paths' attribute with paths of splits of the data."
+        assert (
+            split in panels_config["paths"]
+        ), f"Panels config must have '{split}' attribute with data path."
+        assert (
+            "datasets" in panels_config
+        ), "Panels config must have 'datasets' attribute with subdirectories."
+        assert (
+            "markers" in panels_config
+        ), "Panels config must have 'markers' attribute with channel IDs."
 
         self.channel_ids = {
             dataset: torch.tensor(
-                [marker_tokenizer[marker] for marker in panels_config["markers"][dataset]],
+                [
+                    marker_tokenizer[marker]
+                    for marker in panels_config["markers"][dataset]
+                ],
                 dtype=torch.long,
             )
             for dataset in panels_config["datasets"]
@@ -77,7 +88,9 @@ class DatasetFromTIFF(Dataset):
         self.use_clip_normalization = use_clip_normalization
         self.use_preprocessing = use_preprocessing
         self.file_extension = file_extension
-        self.read_file_func = tifffile.imread if self.file_extension == "tiff" else np.load
+        self.read_file_func = (
+            tifffile.imread if self.file_extension == "tiff" else np.load
+        )
 
     @staticmethod
     def preprocess(img):
@@ -85,13 +98,16 @@ class DatasetFromTIFF(Dataset):
 
     @staticmethod
     def denoise(img):
-        denoised_channels = [medianBlur(img[i].astype("float32"), 3) for i in range(img.shape[0])]
+        denoised_channels = [
+            medianBlur(img[i].astype("float32"), 3) for i in range(img.shape[0])
+        ]
         return np.stack(denoised_channels)
 
     @staticmethod
     def butterworth(img):
         filtered_channels = [
-            filters.butterworth(img[i], cutoff_frequency_ratio=0.2, high_pass=False) for i in range(img.shape[0])
+            filters.butterworth(img[i], cutoff_frequency_ratio=0.2, high_pass=False)
+            for i in range(img.shape[0])
         ]
         return np.stack(filtered_channels)
 
@@ -99,7 +115,9 @@ class DatasetFromTIFF(Dataset):
     def norm_minmax(img):
         min_val = np.min(img, axis=(1, 2), keepdims=True)
         max_val = np.max(img, axis=(1, 2), keepdims=True)
-        scaled_img = np.where(max_val == min_val, img, (img - min_val) / (max_val - min_val + 1e-8))
+        scaled_img = np.where(
+            max_val == min_val, img, (img - min_val) / (max_val - min_val + 1e-8)
+        )
         scaled_img = np.clip(scaled_img, 0, 1)
         return scaled_img
 

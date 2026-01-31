@@ -9,7 +9,12 @@ from ruamel.yaml import YAML
 from torch.amp import GradScaler, autocast
 from torch.nn.functional import normalize
 from torch.utils.data import DataLoader
-from torchvision.transforms import Compose, RandomCrop, RandomHorizontalFlip, RandomRotation
+from torchvision.transforms import (
+    Compose,
+    RandomCrop,
+    RandomHorizontalFlip,
+    RandomRotation,
+)
 from torchvision.transforms.functional import InterpolationMode
 from tqdm import tqdm
 
@@ -78,7 +83,9 @@ def train_masked(
             )
 
             # Apply spatial masking
-            masked_img, _ = apply_spatial_masking(masked_img, spatial_masking_ratio, mask_patch_size)
+            masked_img, _ = apply_spatial_masking(
+                masked_img, spatial_masking_ratio, mask_patch_size
+            )
 
             with autocast(device_type="cuda", dtype=torch.bfloat16):
                 output = model(masked_img, active_channel_ids, channel_ids)["output"]
@@ -154,7 +161,9 @@ def test_masked(
     running_loss = 0.0
     running_mae = 0.0
     running_mse = 0.0
-    plot_indices = np.random.choice(np.arange(len(test_dataloader)), size=num_plots, replace=False)
+    plot_indices = np.random.choice(
+        np.arange(len(test_dataloader)), size=num_plots, replace=False
+    )
     plot_indices = set(plot_indices)
 
     all_latents = []
@@ -177,7 +186,9 @@ def test_masked(
             )
 
             # Apply spatial masking
-            masked_img, pixel_mask = apply_spatial_masking(masked_img, spatial_masking_ratio, mask_patch_size)
+            masked_img, pixel_mask = apply_spatial_masking(
+                masked_img, spatial_masking_ratio, mask_patch_size
+            )
 
             latent = model.encode(masked_img, active_channel_ids)["output"]
             output = model.decode(latent, channel_ids)
@@ -188,7 +199,9 @@ def test_masked(
             all_latents.append(latent.cpu())
 
             # Accumulate per-channel statistics for correlation analysis
-            variance_per_channel = torch.exp(logvar).mean(dim=(0, 2, 3))  # Mean variance per channel
+            variance_per_channel = torch.exp(logvar).mean(
+                dim=(0, 2, 3)
+            )  # Mean variance per channel
             mae_per_channel = torch.abs(img - mi).mean(dim=(0, 2, 3))  # MAE per channel
             all_channel_variances.append(variance_per_channel.cpu())
             all_channel_maes.append(mae_per_channel.cpu())
@@ -199,8 +212,12 @@ def test_masked(
             running_mse += torch.square(img - mi).mean().item()
 
             if idx in plot_indices:
-                unactive_channels = [i for i in channel_ids[0] if i not in active_channel_ids[0]]
-                masked_channels_names = "\n".join([marker_names_map[i.item()] for i in unactive_channels])
+                unactive_channels = [
+                    i for i in channel_ids[0] if i not in active_channel_ids[0]
+                ]
+                masked_channels_names = "\n".join(
+                    [marker_names_map[i.item()] for i in unactive_channels]
+                )
 
                 reconstr_img = plot_reconstructs_with_masks(
                     img,
@@ -232,9 +249,9 @@ def test_masked(
     all_channel_variances = torch.cat(all_channel_variances)
     all_channel_maes = torch.cat(all_channel_maes)
     # Calculate Pearson correlation using flattened data across all batches
-    variance_mae_corr = torch.corrcoef(torch.stack([all_channel_variances.flatten(), all_channel_maes.flatten()]))[
-        0, 1
-    ].item()
+    variance_mae_corr = torch.corrcoef(
+        torch.stack([all_channel_variances.flatten(), all_channel_maes.flatten()])
+    )[0, 1].item()
 
     log_validation_metrics(
         val_loss=val_loss,
@@ -262,7 +279,7 @@ if __name__ == "__main__":
     device = config.device
     print(f"Using device: {device}")
 
-    SIZE = [config.image_size, config.image_size]
+    SIZE = config.input_image_size
     BATCH_SIZE = config.batch_size
     NUM_WORKERS = config.num_workers
 
@@ -328,14 +345,20 @@ if __name__ == "__main__":
 
     # Build model configuration
     num_channels = len(TOKENIZER)
-    model = MultiplexAutoencoder(num_channels=num_channels, **config.model_config.dict()).to(device)
+    model = MultiplexAutoencoder(
+        num_channels=num_channels, **config.model_config.dict()
+    ).to(device)
 
     # Setup optimizer and scheduler
-    total_steps = len(train_dataloader) * config.epochs // config.gradient_accumulation_steps
+    total_steps = (
+        len(train_dataloader) * config.epochs // config.gradient_accumulation_steps
+    )
     num_warmup_steps = int(total_steps * config.frac_warmup_steps)
     num_annealing_steps = total_steps - num_warmup_steps
 
-    optimizer = optim.AdamW(model.parameters(), lr=config.peak_lr, weight_decay=config.weight_decay)
+    optimizer = optim.AdamW(
+        model.parameters(), lr=config.peak_lr, weight_decay=config.weight_decay
+    )
     scheduler = get_scheduler_with_warmup(
         optimizer,
         num_warmup_steps,
@@ -346,7 +369,9 @@ if __name__ == "__main__":
     )
 
     # Build wandb config
-    wandb_config = build_wandb_config(config, num_channels, num_warmup_steps, num_annealing_steps)
+    wandb_config = build_wandb_config(
+        config, num_channels, num_warmup_steps, num_annealing_steps
+    )
 
     # Initialize wandb
     init_wandb_run(wandb_config)

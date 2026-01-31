@@ -1,7 +1,7 @@
 """Configuration models and utilities using Pydantic for validation."""
 
 import os
-from typing import Any, Dict, List, Optional
+from typing import Any, Dict, List, Optional, Tuple
 
 from pydantic import BaseModel, Field, field_validator
 
@@ -21,11 +21,21 @@ class HyperkernelConfig(BaseModel):
 class EncoderConfig(BaseModel):
     """Configuration for MultiplexImageEncoder."""
 
-    ma_layers_blocks: List[int] = Field(..., description="Number of blocks in each marker-agnostic layer")
-    ma_embedding_dims: List[int] = Field(..., description="Embedding dimensions for marker-agnostic layers")
-    pm_layers_blocks: List[int] = Field(..., description="Number of blocks in each pan-marker layer")
-    pm_embedding_dims: List[int] = Field(..., description="Embedding dimensions for pan-marker layers")
-    hyperkernel_config: HyperkernelConfig = Field(..., description="Hyperkernel configuration", alias="hyperkernel")
+    ma_layers_blocks: List[int] = Field(
+        ..., description="Number of blocks in each marker-agnostic layer"
+    )
+    ma_embedding_dims: List[int] = Field(
+        ..., description="Embedding dimensions for marker-agnostic layers"
+    )
+    pm_layers_blocks: List[int] = Field(
+        ..., description="Number of blocks in each pan-marker layer"
+    )
+    pm_embedding_dims: List[int] = Field(
+        ..., description="Embedding dimensions for pan-marker layers"
+    )
+    hyperkernel_config: HyperkernelConfig = Field(
+        ..., description="Hyperkernel configuration", alias="hyperkernel"
+    )
 
     @field_validator("ma_layers_blocks", "pm_layers_blocks")
     @classmethod
@@ -56,14 +66,18 @@ class EncoderConfig(BaseModel):
     @classmethod
     def validate_pm_not_empty(cls, v: List[int]) -> List[int]:
         if len(v) == 0:
-            raise ValueError("pm_layers_blocks cannot be empty - at least one pan-marker layer is required")
+            raise ValueError(
+                "pm_layers_blocks cannot be empty - at least one pan-marker layer is required"
+            )
         return v
 
     @field_validator("pm_embedding_dims")
     @classmethod
     def validate_pm_lengths(cls, v: List[int], info) -> List[int]:
         if len(v) == 0:
-            raise ValueError("pm_embedding_dims cannot be empty - at least one pan-marker layer is required")
+            raise ValueError(
+                "pm_embedding_dims cannot be empty - at least one pan-marker layer is required"
+            )
         if "pm_layers_blocks" in info.data:
             blocks = info.data["pm_layers_blocks"]
             if len(v) != len(blocks):
@@ -74,7 +88,9 @@ class EncoderConfig(BaseModel):
 
     @field_validator("hyperkernel_config")
     @classmethod
-    def validate_hyperkernel_embedding(cls, v: HyperkernelConfig, info) -> HyperkernelConfig:
+    def validate_hyperkernel_embedding(
+        cls, v: HyperkernelConfig, info
+    ) -> HyperkernelConfig:
         if "pm_embedding_dims" in info.data and len(info.data["pm_embedding_dims"]) > 0:
             expected_dim = info.data["pm_embedding_dims"][0]
             if v.embedding_dim != expected_dim:
@@ -91,9 +107,15 @@ class EncoderConfig(BaseModel):
 class DecoderConfig(BaseModel):
     """Configuration for MultiplexImageDecoder."""
 
-    decoded_embed_dim: int = Field(..., gt=0, description="Embedding dimension of decoded tensor")
-    num_blocks: int = Field(..., gt=0, description="Number of ConvNeXt blocks in decoder")
-    hyperkernel_config: HyperkernelConfig = Field(..., description="Hyperkernel configuration", alias="hyperkernel")
+    decoded_embed_dim: int = Field(
+        ..., gt=0, description="Embedding dimension of decoded tensor"
+    )
+    num_blocks: int = Field(
+        ..., gt=0, description="Number of ConvNeXt blocks in decoder"
+    )
+    hyperkernel_config: HyperkernelConfig = Field(
+        ..., description="Hyperkernel configuration", alias="hyperkernel"
+    )
 
     class Config:
         extra = "forbid"
@@ -102,8 +124,12 @@ class DecoderConfig(BaseModel):
 class ModelConfig(BaseModel):
     """Configuration for the entire multiplex image model."""
 
-    encoder_config: EncoderConfig = Field(..., description="Encoder configuration", alias="encoder")
-    decoder_config: DecoderConfig = Field(..., description="Decoder configuration", alias="decoder")
+    encoder_config: EncoderConfig = Field(
+        ..., description="Encoder configuration", alias="encoder"
+    )
+    decoder_config: DecoderConfig = Field(
+        ..., description="Decoder configuration", alias="decoder"
+    )
 
     class Config:
         extra = "forbid"
@@ -113,27 +139,43 @@ class TrainingConfig(BaseModel):
     """Pydantic model for training configuration with validation."""
 
     # Data parameters
-    device: str = Field(..., description="Device to use for training (e.g., 'cuda', 'cpu')")
-    image_size: int = Field(..., gt=0, description="Input image size (assumed square)")
+    device: str = Field(
+        ..., description="Device to use for training (e.g., 'cuda', 'cpu')"
+    )
+    input_image_size: Tuple[int, int] = Field(
+        ..., description="Input image size (height, width)"
+    )
     batch_size: int = Field(..., gt=0, description="Batch size for training")
     num_workers: int = Field(..., ge=0, description="Number of data loading workers")
 
     # Config file paths
     panel_config: str = Field(..., description="Path to panel configuration file")
-    tokenizer_config: str = Field(..., description="Path to tokenizer configuration file")
+    tokenizer_config: str = Field(
+        ..., description="Path to tokenizer configuration file"
+    )
 
     # Training parameters
     peak_lr: float = Field(..., gt=0, description="Peak learning rate")
-    final_lr: float = Field(..., gt=0, description="Final learning rate after annealing")
-    frac_warmup_steps: float = Field(..., ge=0, le=1, description="Fraction of steps for warmup")
+    final_lr: float = Field(
+        ..., gt=0, description="Final learning rate after annealing"
+    )
+    frac_warmup_steps: float = Field(
+        ..., ge=0, le=1, description="Fraction of steps for warmup"
+    )
     weight_decay: float = Field(..., ge=0, description="Weight decay for optimizer")
-    gradient_accumulation_steps: int = Field(..., gt=0, description="Number of gradient accumulation steps")
+    gradient_accumulation_steps: int = Field(
+        ..., gt=0, description="Number of gradient accumulation steps"
+    )
     epochs: int = Field(..., gt=0, description="Number of training epochs")
     beta: float = Field(..., ge=0, description="Beta parameter for beta-NLL loss")
 
     # Masking parameters
-    min_channels_frac: float = Field(..., gt=0, le=1, description="Minimum fraction of channels to keep")
-    spatial_masking_ratio: float = Field(..., ge=0, le=1, description="Fraction of spatial patches to mask")
+    min_channels_frac: float = Field(
+        ..., gt=0, le=1, description="Minimum fraction of channels to keep"
+    )
+    spatial_masking_ratio: float = Field(
+        ..., ge=0, le=1, description="Fraction of spatial patches to mask"
+    )
     fully_masked_channels_max_frac: float = Field(
         ..., ge=0, le=1, description="Maximum fraction of channels to fully mask"
     )
@@ -147,8 +189,12 @@ class TrainingConfig(BaseModel):
         None,
         description="Path to checkpoint to resume from. Use 'last' to load last checkpoint if available",
     )
-    checkpoints_dir: str = Field("checkpoints", description="Directory to save checkpoints")
-    save_checkpoint_freq: int = Field(..., gt=0, description="Frequency of checkpoint saving (in epochs)")
+    checkpoints_dir: str = Field(
+        "checkpoints", description="Directory to save checkpoints"
+    )
+    save_checkpoint_freq: int = Field(
+        ..., gt=0, description="Frequency of checkpoint saving (in epochs)"
+    )
 
     # Wandb parameters
     wandb_project: str = Field(..., description="Wandb project name")
@@ -173,12 +219,16 @@ class TrainingConfig(BaseModel):
 
                 self.run_name = get_run_name()
 
-            last_possible_checkpoint = f"{self.checkpoints_dir}/last_checkpoint-{self.run_name}.pth"
+            last_possible_checkpoint = (
+                f"{self.checkpoints_dir}/last_checkpoint-{self.run_name}.pth"
+            )
             if os.path.exists(last_possible_checkpoint):
                 self.from_checkpoint = last_possible_checkpoint
                 return True
             else:
-                print(f"No last checkpoint found at {last_possible_checkpoint}, starting from scratch.")
+                print(
+                    f"No last checkpoint found at {last_possible_checkpoint}, starting from scratch."
+                )
                 self.from_checkpoint = None
                 return False
 

@@ -44,14 +44,18 @@ def apply_channel_masking(
             new_img = []
             new_channel_ids = []
             for b_i in range(batch_size):
-                channels_subset_idx = torch.randperm(num_channels)[:num_sampled_channels]
+                channels_subset_idx = torch.randperm(num_channels)[
+                    :num_sampled_channels
+                ]
                 new_img.append(img[b_i : b_i + 1, channels_subset_idx, :, :])
                 new_channel_ids.append(channel_ids[b_i : b_i + 1, channels_subset_idx])
             img = torch.cat(new_img, dim=0)
             channel_ids = torch.cat(new_channel_ids, dim=0)
 
     # Step 2: Sample full channels to mask (drop)
-    max_channels_to_mask = int(np.ceil(num_sampled_channels * fully_masked_channels_max_frac))
+    max_channels_to_mask = int(
+        np.ceil(num_sampled_channels * fully_masked_channels_max_frac)
+    )
     num_channels_to_mask = np.random.randint(1, max_channels_to_mask + 1)
 
     masked_img = []
@@ -94,7 +98,9 @@ def apply_spatial_masking(
     mask = mask <= spatial_masking_ratio
 
     # Upsample mask to pixel level
-    pixel_mask = mask.repeat_interleave(mask_patch_size, dim=2).repeat_interleave(mask_patch_size, dim=3)
+    pixel_mask = mask.repeat_interleave(mask_patch_size, dim=2).repeat_interleave(
+        mask_patch_size, dim=3
+    )
 
     # Apply mask
     masked_img = img.clone()
