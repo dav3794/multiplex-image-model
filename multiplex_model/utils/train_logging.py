@@ -236,7 +236,7 @@ def init_experiment(config: Dict[str, Any]) -> None:
     run_name = config.get("run_name", None)
     if run_name is None:
         # get current date-time as default run name
-        run_name = datetime.now().strftime("%y-%m-%d_%H:%M:%S")
+        run_name = datetime.now().strftime("%m%d_%H:%M:%S")
 
     _experiment.set_name(run_name)
     _experiment.add_tags(config.get("tags", []))
@@ -338,7 +338,7 @@ def log_validation_images(
     
     _experiment.log_image(
         img,
-        name=f"val/reconstructions_panel{panel_idx}_epoch{epoch+1}_img{img_idx}",
+        name=f"val/reconstructions_panel-{panel_idx}_epoch-{epoch+1}_img-{img_idx}",
         step=epoch,
         metadata={
             "panel_idx": panel_idx,
