@@ -1,6 +1,7 @@
 import os
 import sys
 
+import comet_ml # noqa: F401
 import matplotlib.pyplot as plt
 import numpy as np
 import torch
@@ -19,9 +20,10 @@ from torchvision.transforms.functional import InterpolationMode
 from tqdm import tqdm
 
 from multiplex_model.data import DatasetFromTIFF, PanelBatchSampler, TestCrop
-from multiplex_model.losses import RankMe, beta_nll_loss, intrinsic_dimension, nll_loss
+from multiplex_model.losses import RankMe, beta_nll_loss, nll_loss
 from multiplex_model.modules import MultiplexAutoencoder
 from multiplex_model.utils import (
+    ClampWithGrad,
     TrainingConfig,
     apply_channel_masking,
     apply_spatial_masking,
@@ -64,6 +66,7 @@ def train_masked(
         os.makedirs(checkpoints_path, exist_ok=True)
         print(f"Created checkpoints directory at {checkpoints_path}")
 
+    step = 0
     for epoch in range(start_epoch, epochs):
         model.train()
         for batch_idx, (img, channel_ids, panel_idx, img_path) in enumerate(
@@ -90,6 +93,7 @@ def train_masked(
                 output = model(masked_img, active_channel_ids, channel_ids)["output"]
                 mi, logvar = output.unbind(dim=-1)
                 mi = torch.sigmoid(mi)
+                logvar = ClampWithGrad.apply(logvar, -15.0, 15.0)
 
                 loss = beta_nll_loss(img, mi, logvar, beta=beta)
 
@@ -110,7 +114,9 @@ def train_masked(
                     logvar=logvar.mean().item(),
                     mae=torch.abs(img - mi).mean().item(),
                     mse=torch.square(img - mi).mean().item(),
+                    step=step,
                 )
+                step += 1
 
         val_loss = test_masked(
             model,
@@ -151,7 +157,7 @@ def test_masked(
     device,
     epoch,
     marker_names_map,
-    num_plots=5,
+    num_plots=4,
     spatial_masking_ratio=0.6,
     fully_masked_channels_max_frac=0.5,
     mask_patch_size=8,
@@ -214,7 +220,7 @@ def test_masked(
                 unactive_channels = [
                     i for i in channel_ids[0] if i not in active_channel_ids[0]
                 ]
-                masked_channels_names = "\n".join(
+                masked_channels_names = " | ".join(
                     [marker_names_map[i.item()] for i in unactive_channels]
                 )
 
@@ -233,6 +239,7 @@ def test_masked(
                     img_path=img_path[0],
                     epoch=epoch,
                     masked_channels_names=masked_channels_names,
+                    img_idx=idx,
                 )
                 plt.close("all")
 
@@ -242,7 +249,6 @@ def test_masked(
 
     all_latents = torch.cat(all_latents)
     rankme = RankMe(all_latents)
-    intinsic_dim = intrinsic_dimension(all_latents)
 
     # Calculate Pearson correlation between predicted variances and MAEs per channel
     all_channel_variances = torch.cat(all_channel_variances)
@@ -257,7 +263,6 @@ def test_masked(
         val_mae=val_mae,
         val_mse=val_mse,
         latent_rankme=rankme,
-        latent_intrinsic_dim=intinsic_dim,
         epoch=epoch,
         variance_mae_correlation=variance_mae_corr,
     )

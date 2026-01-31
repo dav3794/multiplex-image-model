@@ -1,5 +1,4 @@
 import torch
-from skdim.id import TwoNN
 
 
 def nll_loss(x, mi, logvar):
@@ -20,7 +19,3 @@ def RankMe(features):
     rank_me = torch.exp(entropy)
     return rank_me
 
-
-def intrinsic_dimension(features):
-    id = TwoNN().fit_transform(features)
-    return id

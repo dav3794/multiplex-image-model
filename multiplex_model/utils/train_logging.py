@@ -1,12 +1,18 @@
 """Logging and visualization utilities for training and validation."""
 
+from io import BytesIO
 from math import ceil
+from datetime import datetime
 from typing import Any, Dict, List, Optional
 
 import matplotlib.pyplot as plt
 import numpy as np
+from PIL import Image
 import torch
 from comet_ml import Experiment
+
+# Disable PIL's decompression bomb limit
+Image.MAX_IMAGE_PIXELS = None
 
 # Global experiment instance
 _experiment: Optional[Experiment] = None
@@ -227,7 +233,12 @@ def init_experiment(config: Dict[str, Any]) -> None:
         workspace=config.get("comet_workspace"),
         api_key=config.get("comet_api_key"),  # Can also be set via env var COMET_API_KEY
     )
-    _experiment.set_name(config.get("run_name", None))
+    run_name = config.get("run_name", None)
+    if run_name is None:
+        # get current date-time as default run name
+        run_name = datetime.now().strftime("%y-%m-%d_%H:%M:%S")
+
+    _experiment.set_name(run_name)
     _experiment.add_tags(config.get("tags", []))
     _experiment.log_parameters(config)
 
@@ -271,7 +282,6 @@ def log_validation_metrics(
     val_mae: float,
     val_mse: float,
     latent_rankme: float,
-    latent_intrinsic_dim: float,
     epoch: int,
     variance_mae_correlation: Optional[float] = None,
 ) -> None:
@@ -282,7 +292,6 @@ def log_validation_metrics(
         val_mae (float): Validation MAE
         val_mse (float): Validation MSE
         latent_rankme (float): RankMe metric for latent representations
-        latent_intrinsic_dim (float): Intrinsic dimension of latent representations
         epoch (int): Current epoch number
         variance_mae_correlation (Optional[float]): Pearson correlation between predicted variances and MAEs per channel
     """
@@ -294,8 +303,6 @@ def log_validation_metrics(
         "val/mae": val_mae,
         "val/mse": val_mse,
         "val/latent_RankMe": latent_rankme,
-        "val/latent_intinsic_dim": latent_intrinsic_dim,
-        "epoch": epoch,
     }
     if variance_mae_correlation is not None:
         metrics["val/variance_mae_correlation"] = variance_mae_correlation
@@ -308,6 +315,7 @@ def log_validation_images(
     img_path: str,
     epoch: int,
     masked_channels_names: str,
+    img_idx: int,
 ) -> None:
     """Log validation reconstruction images to Comet.ml.
 
@@ -317,24 +325,38 @@ def log_validation_images(
         img_path (str): Path to the image
         epoch (int): Current epoch number
         masked_channels_names (str): Names of masked channels
+        img_idx (int): Index of the image in the batch
     """
     if _experiment is None:
         return
     
-    _experiment.log_figure(
-        figure_name=f"val/reconstructions_panel{panel_idx}_epoch{epoch+1}",
-        figure=fig,
+    # Convert figure to image
+    buf = BytesIO()
+    fig.savefig(buf, format='png', dpi=150, bbox_inches='tight')
+    buf.seek(0)
+    img = Image.open(buf)
+    
+    _experiment.log_image(
+        img,
+        name=f"val/reconstructions_panel{panel_idx}_epoch{epoch+1}_img{img_idx}",
         step=epoch,
+        metadata={
+            "panel_idx": panel_idx,
+            "img_path": img_path,
+            "masked_channels": masked_channels_names,
+        }
     )
+    
+    buf.close()
 
 
-def get_run_name() -> str | None:
+def get_run_name() -> str:
     """Get the current Comet.ml experiment name.
 
     Returns:
-        str | None : Current experiment name or None if no experiment is active
+        str : Current experiment name or "unknown" if no experiment is active
     """
-    return _experiment.get_name() if _experiment else None
+    return _experiment.get_name() if _experiment else "unknown"
 
 
 def finish_experiment() -> None:
