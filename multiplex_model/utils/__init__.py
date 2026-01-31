@@ -20,9 +20,9 @@ from .optim import (
 
 # Logging and visualization
 from .train_logging import (
-    finish_wandb_run,
+    finish_experiment,
     get_run_name,
-    init_wandb_run,
+    init_experiment,
     log_training_metrics,
     log_validation_images,
     log_validation_metrics,
@@ -36,19 +36,18 @@ __all__ = [
     "EncoderConfig",
     "DecoderConfig",
     "TrainingConfig",
-    "build_wandb_config",
     # Masking
     "apply_channel_masking",
     "apply_spatial_masking",
     # Logging
     "plot_reconstructs_with_uncertainty",
     "plot_reconstructs_with_masks",
-    "init_wandb_run",
+    "init_experiment",
     "log_training_metrics",
     "log_validation_metrics",
     "log_validation_images",
     "get_run_name",
-    "finish_wandb_run",
+    "finish_experiment",
     # Optim
     "ClampWithGrad",
     "get_scheduler_with_warmup",

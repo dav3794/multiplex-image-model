@@ -46,6 +46,8 @@ checkpoints_dir: checkpoints
 save_checkpoint_freq: 5
 beta: 1.0
 
-# Wandb logging configuration
+# Comet.ml logging configuration
 tags: [...]
-wandb_project: ...
+comet_project: ...
+comet_workspace: null  # optional, can also be set via COMET_WORKSPACE env var
+comet_api_key: null  # optional, can also be set via COMET_API_KEY env var

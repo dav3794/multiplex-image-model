@@ -27,7 +27,7 @@ dependencies = [
     "numpy==2.2.6",
     "torchvision==0.22.1",
     "tqdm==4.67.1",
-    "wandb>=0.18.0",
+    "comet-ml>=3.0.0",
     "pydantic>=2.0.0",
     "matplotlib==3.10.3",
     "pandas==2.3.1",

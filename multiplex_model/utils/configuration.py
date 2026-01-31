@@ -1,7 +1,7 @@
 """Configuration models and utilities using Pydantic for validation."""
 
 import os
-from typing import Any, Dict, List, Optional, Tuple
+from typing import List, Optional, Tuple
 
 from pydantic import BaseModel, Field, field_validator
 
@@ -173,10 +173,12 @@ class TrainingConfig(BaseModel):
         ..., gt=0, description="Frequency of checkpoint saving (in epochs)"
     )
 
-    # Wandb parameters
-    wandb_project: str = Field(..., description="Wandb project name")
-    tags: List[str] = Field(default_factory=list, description="Tags for wandb run")
-    run_name: Optional[str] = Field(None, description="Name for wandb run")
+    # Comet.ml parameters
+    comet_project: str = Field(..., description="Comet.ml project name")
+    comet_workspace: Optional[str] = Field(None, description="Comet.ml workspace name")
+    comet_api_key: Optional[str] = Field(None, description="Comet.ml API key (can also be set via COMET_API_KEY env var)")
+    tags: List[str] = Field(default_factory=list, description="Tags for Comet.ml experiment")
+    run_name: Optional[str] = Field(None, description="Name for Comet.ml experiment")
 
     def resolve_checkpoint(self) -> bool:
         """Resolve checkpoint path and determine if checkpoint should be loaded.

@@ -25,10 +25,10 @@ from multiplex_model.utils import (
     TrainingConfig,
     apply_channel_masking,
     apply_spatial_masking,
-    finish_wandb_run,
+    finish_experiment,
     get_run_name,
     get_scheduler_with_warmup,
-    init_wandb_run,
+    init_experiment,
     log_training_metrics,
     log_validation_images,
     log_validation_metrics,
@@ -369,9 +369,9 @@ if __name__ == "__main__":
         type="cosine",
     )
 
-    # # Initialize wandb
-    wandb_config = config.model_dump()
-    init_wandb_run(wandb_config)
+    # Initialize Comet.ml experiment
+    comet_config = config.model_dump()
+    init_experiment(comet_config)
 
     # Load checkpoint if specified
     start_epoch = 0
@@ -403,4 +403,4 @@ if __name__ == "__main__":
         checkpoints_path=config.checkpoints_dir,
     )
 
-    finish_wandb_run()
+    finish_experiment()

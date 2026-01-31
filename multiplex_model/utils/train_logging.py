@@ -6,7 +6,10 @@ from typing import Any, Dict, List, Optional
 import matplotlib.pyplot as plt
 import numpy as np
 import torch
-import wandb
+from comet_ml import Experiment
+
+# Global experiment instance
+_experiment: Optional[Experiment] = None
 
 
 def plot_reconstructs_with_uncertainty(
@@ -212,18 +215,21 @@ def plot_reconstructs_with_masks(
     return fig
 
 
-def init_wandb_run(config: Dict[str, Any]) -> None:
-    """Initialize wandb run with the given configuration.
+def init_experiment(config: Dict[str, Any]) -> None:
+    """Initialize Comet.ml experiment with the given configuration.
 
     Args:
-        config (Dict[str, Any]): Configuration dictionary containing wandb settings
+        config (Dict[str, Any]): Configuration dictionary containing Comet.ml settings
     """
-    wandb.init(
-        project=config["wandb_project"],
-        config=config,
-        tags=config.get("tags", []),
-        name=config.get("run_name", None),
+    global _experiment
+    _experiment = Experiment(
+        project_name=config["comet_project"],
+        workspace=config.get("comet_workspace"),
+        api_key=config.get("comet_api_key"),  # Can also be set via env var COMET_API_KEY
     )
+    _experiment.set_name(config.get("run_name", None))
+    _experiment.add_tags(config.get("tags", []))
+    _experiment.log_parameters(config)
 
 
 def log_training_metrics(
@@ -235,7 +241,7 @@ def log_training_metrics(
     mse: float,
     step: Optional[int] = None,
 ) -> None:
-    """Log training metrics to wandb.
+    """Log training metrics to Comet.ml.
 
     Args:
         loss (float): Training loss
@@ -246,6 +252,9 @@ def log_training_metrics(
         mse (float): Mean squared error
         step (Optional[int]): Step number for logging
     """
+    if _experiment is None:
+        return
+    
     metrics = {
         "train/loss": loss,
         "train/lr": lr,
@@ -254,7 +263,7 @@ def log_training_metrics(
         "train/mae": mae,
         "train/mse": mse,
     }
-    wandb.log(metrics, step=step)
+    _experiment.log_metrics(metrics, step=step)
 
 
 def log_validation_metrics(
@@ -266,7 +275,7 @@ def log_validation_metrics(
     epoch: int,
     variance_mae_correlation: Optional[float] = None,
 ) -> None:
-    """Log validation metrics to wandb.
+    """Log validation metrics to Comet.ml.
 
     Args:
         val_loss (float): Validation loss
@@ -277,6 +286,9 @@ def log_validation_metrics(
         epoch (int): Current epoch number
         variance_mae_correlation (Optional[float]): Pearson correlation between predicted variances and MAEs per channel
     """
+    if _experiment is None:
+        return
+    
     metrics = {
         "val/loss": val_loss,
         "val/mae": val_mae,
@@ -287,7 +299,7 @@ def log_validation_metrics(
     }
     if variance_mae_correlation is not None:
         metrics["val/variance_mae_correlation"] = variance_mae_correlation
-    wandb.log(metrics)
+    _experiment.log_metrics(metrics, epoch=epoch)
 
 
 def log_validation_images(
@@ -297,7 +309,7 @@ def log_validation_images(
     epoch: int,
     masked_channels_names: str,
 ) -> None:
-    """Log validation reconstruction images to wandb.
+    """Log validation reconstruction images to Comet.ml.
 
     Args:
         fig (plt.Figure): Matplotlib figure to log
@@ -306,22 +318,28 @@ def log_validation_images(
         epoch (int): Current epoch number
         masked_channels_names (str): Names of masked channels
     """
-    caption = (
-        f"Resulting outputs (dataset {panel_idx}, image {img_path}, epoch {epoch+1})"
-        f"\n\nMasked channels: {masked_channels_names}"
+    if _experiment is None:
+        return
+    
+    _experiment.log_figure(
+        figure_name=f"val/reconstructions_panel{panel_idx}_epoch{epoch+1}",
+        figure=fig,
+        step=epoch,
     )
-    wandb.log({"val/reconstructions": wandb.Image(fig, caption=caption)})
 
 
 def get_run_name() -> str | None:
-    """Get the current wandb run name.
+    """Get the current Comet.ml experiment name.
 
     Returns:
-        str | None : Current run name or None if no run is active
+        str | None : Current experiment name or None if no experiment is active
     """
-    return wandb.run.name if wandb.run else None
+    return _experiment.get_name() if _experiment else None
 
 
-def finish_wandb_run() -> None:
-    """Finish the current wandb run."""
-    wandb.finish()
+def finish_experiment() -> None:
+    """Finish the current Comet.ml experiment."""
+    global _experiment
+    if _experiment is not None:
+        _experiment.end()
+        _experiment = None
