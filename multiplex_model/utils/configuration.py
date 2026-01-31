@@ -107,20 +107,6 @@ class DecoderConfig(BaseModel):
         extra = "forbid"
 
 
-class ModelConfig(BaseModel):
-    """Configuration for the entire multiplex image model."""
-
-    encoder_config: EncoderConfig = Field(
-        ..., description="Encoder configuration", alias="encoder"
-    )
-    decoder_config: DecoderConfig = Field(
-        ..., description="Decoder configuration", alias="decoder"
-    )
-
-    class Config:
-        extra = "forbid"
-
-
 class TrainingConfig(BaseModel):
     """Pydantic model for training configuration with validation."""
 
@@ -141,7 +127,7 @@ class TrainingConfig(BaseModel):
     )
 
     # Training parameters
-    peak_lr: float = Field(..., gt=0, description="Peak learning rate")
+    peak_lr: float = Field(..., gt=0, description="Peak learning rate", alias="lr")
     final_lr: float = Field(
         ..., gt=0, description="Final learning rate after annealing"
     )
@@ -168,7 +154,12 @@ class TrainingConfig(BaseModel):
     mask_patch_size: int = Field(..., gt=0, description="Size of spatial mask patches")
 
     # Model architecture
-    model: ModelConfig = Field(..., description="Model architecture configuration")
+    encoder_config: EncoderConfig = Field(
+        ..., description="Encoder configuration", alias="encoder"
+    )
+    decoder_config: DecoderConfig = Field(
+        ..., description="Decoder configuration", alias="decoder"
+    )
 
     # Checkpoint parameters
     from_checkpoint: Optional[str] = Field(
