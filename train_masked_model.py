@@ -25,7 +25,6 @@ from multiplex_model.utils import (
     TrainingConfig,
     apply_channel_masking,
     apply_spatial_masking,
-    build_wandb_config,
     finish_wandb_run,
     get_run_name,
     get_scheduler_with_warmup,
