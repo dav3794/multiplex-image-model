@@ -252,8 +252,7 @@ def get_next_version_number(
             sort_by="startTime",
             sort_order="desc",
         )
-        print(f"Found {len(experiments)} existing experiments for versioning.")
-        
+
         # Extract version numbers from experiment names
         if not experiments:
             return 0
@@ -298,7 +297,7 @@ def init_experiment(config: Dict[str, Any]) -> None:
             # Fallback to date-time as default run name
             run_name = datetime.now().strftime("%m%d_%H:%M:%S")
 
-    print(f"Comet.ml run name: {run_name}")
+    print(f"Run name: {run_name}")
     _experiment.set_name(run_name)
     _experiment.add_tags(config.get("tags", []))
     _experiment.log_parameters(config)
