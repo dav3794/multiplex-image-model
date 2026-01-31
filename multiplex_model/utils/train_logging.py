@@ -4,12 +4,13 @@ from io import BytesIO
 from math import ceil
 from datetime import datetime
 from typing import Any, Dict, List, Optional
+import re
 
 import matplotlib.pyplot as plt
 import numpy as np
 from PIL import Image
 import torch
-from comet_ml import Experiment
+from comet_ml import Experiment, API
 
 # Disable PIL's decompression bomb limit
 Image.MAX_IMAGE_PIXELS = None
@@ -221,6 +222,56 @@ def plot_reconstructs_with_masks(
     return fig
 
 
+def get_next_version_number(
+    project_name: str,
+    workspace: Optional[str] = None,
+    api_key: Optional[str] = None,
+) -> int:
+    """Query Comet.ml API to get the next version number for experiments.
+    
+    Looks for existing experiments with names starting with 'v' followed by a number
+    (e.g., 'v1', 'v42', 'v100') and returns the next available version number.
+    
+    Args:
+        project_name (str): Name of the Comet.ml project
+        workspace (Optional[str]): Comet.ml workspace name
+        api_key (Optional[str]): Comet.ml API key (can also use env var COMET_API_KEY)
+    
+    Returns:
+        int: Next version number to use
+    """
+    try:
+        api = API(api_key=api_key)
+        
+        version_pattern = r'^ImVs-(\d+)'
+        # Get all experiments in the project
+        experiments = api.get_experiments(
+            workspace=workspace,
+            project_name=project_name,
+            pattern=version_pattern,
+            sort_by="startTime",
+            sort_order="desc",
+        )
+        print(f"Found {len(experiments)} existing experiments for versioning.")
+        
+        # Extract version numbers from experiment names
+        if not experiments:
+            return 0
+
+        latest_experiment = experiments[0]
+
+        version = re.match(version_pattern, latest_experiment.name)
+        version = int(version.group(1))
+
+        # Return next version (1 if no versions exist)
+        return version + 1
+        
+    except Exception as e:
+        print(f"Warning: Could not query Comet.ml for version number: {e}")
+        print("Falling back to version 1")
+        return 1
+
+
 def init_experiment(config: Dict[str, Any]) -> None:
     """Initialize Comet.ml experiment with the given configuration.
 
@@ -235,9 +286,19 @@ def init_experiment(config: Dict[str, Any]) -> None:
     )
     run_name = config.get("run_name", None)
     if run_name is None:
-        # get current date-time as default run name
-        run_name = datetime.now().strftime("%m%d_%H:%M:%S")
+        # Get next version number from Comet.ml
+        if config.get("use_versioning", True):
+            version = get_next_version_number(
+                project_name=config["comet_project"],
+                workspace=config.get("comet_workspace"),
+                api_key=config.get("comet_api_key"),
+            )
+            run_name = f"ImVs-{version}"
+        else:
+            # Fallback to date-time as default run name
+            run_name = datetime.now().strftime("%m%d_%H:%M:%S")
 
+    print(f"Comet.ml run name: {run_name}")
     _experiment.set_name(run_name)
     _experiment.add_tags(config.get("tags", []))
     _experiment.log_parameters(config)
