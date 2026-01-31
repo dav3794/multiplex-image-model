@@ -222,27 +222,3 @@ class TrainingConfig(BaseModel):
 
     class Config:
         extra = "forbid"  # Raise error on unknown fields
-
-
-def build_wandb_config(
-    training_config: TrainingConfig,
-    num_channels: int,
-) -> Dict[str, Any]:
-    """Build wandb configuration from training config model.
-
-    Args:
-        training_config (TrainingConfig): Validated training configuration
-        num_channels (int): Number of channels in the model
-
-    Returns:
-        Dict[str, Any]: Complete wandb configuration
-    """
-    # Convert Pydantic model to dict and add additional fields
-    wandb_config = training_config.model_dump()
-    wandb_config.update(
-        {
-            "num_channels": num_channels,
-        }
-    )
-
-    return wandb_config

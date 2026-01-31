@@ -370,10 +370,8 @@ if __name__ == "__main__":
         type="cosine",
     )
 
-    # Build wandb config
-    wandb_config = build_wandb_config(config, num_channels)
-
-    # Initialize wandb
+    # # Initialize wandb
+    wandb_config = config.model_dump()
     init_wandb_run(wandb_config)
 
     # Load checkpoint if specified

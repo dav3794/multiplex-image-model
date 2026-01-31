@@ -6,7 +6,6 @@ from .configuration import (
     EncoderConfig,
     HyperkernelConfig,
     TrainingConfig,
-    build_wandb_config,
 )
 
 # Masking
