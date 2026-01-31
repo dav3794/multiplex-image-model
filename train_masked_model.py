@@ -346,7 +346,9 @@ if __name__ == "__main__":
     # Build model configuration
     num_channels = len(TOKENIZER)
     model = MultiplexAutoencoder(
-        num_channels=num_channels, **config.model_config.dict()
+        num_channels=num_channels,
+        encoder_config=config.encoder_config.model_dump(),
+        decoder_config=config.decoder_config.model_dump(),
     ).to(device)
 
     # Setup optimizer and scheduler
@@ -369,9 +371,7 @@ if __name__ == "__main__":
     )
 
     # Build wandb config
-    wandb_config = build_wandb_config(
-        config, num_channels, num_warmup_steps, num_annealing_steps
-    )
+    wandb_config = build_wandb_config(config, num_channels)
 
     # Initialize wandb
     init_wandb_run(wandb_config)

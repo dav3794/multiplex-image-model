@@ -1,27 +1,26 @@
-model:
-  encoder:
-      # marker-agnostic part
-      ma_layers_blocks: [4,]
-      ma_embedding_dims: [16,]
-      # pan-marker part
-      pm_layers_blocks: [4, 4, 4]
-      pm_embedding_dims: [128, 256, 512]
-
-      hyperkernel:
-        kernel_size: 1
-        padding: 0
-        stride: 1
-        use_bias: true
-
-  decoder:
-    decoded_embed_dim: 384
-    num_blocks: 1
+encoder:
+    # marker-agnostic part
+    ma_layers_blocks: [4,]
+    ma_embedding_dims: [16,]
+    # pan-marker part
+    pm_layers_blocks: [4, 4, 4]
+    pm_embedding_dims: [128, 256, 512]
 
     hyperkernel:
-        kernel_size: 1
-        padding: 0
-        stride: 1
-        use_bias: true
+      kernel_size: 1
+      padding: 0
+      stride: 1
+      use_bias: true
+
+decoder:
+  decoded_embed_dim: 384
+  num_blocks: 1
+
+  hyperkernel:
+      kernel_size: 1
+      padding: 0
+      stride: 1
+      use_bias: true
 
 # Data configuration
 panel_config: configs/all_panels_config.yaml

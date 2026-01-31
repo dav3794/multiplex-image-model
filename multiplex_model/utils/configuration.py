@@ -86,20 +86,6 @@ class EncoderConfig(BaseModel):
                 )
         return v
 
-    @field_validator("hyperkernel_config")
-    @classmethod
-    def validate_hyperkernel_embedding(
-        cls, v: HyperkernelConfig, info
-    ) -> HyperkernelConfig:
-        if "pm_embedding_dims" in info.data and len(info.data["pm_embedding_dims"]) > 0:
-            expected_dim = info.data["pm_embedding_dims"][0]
-            if v.embedding_dim != expected_dim:
-                raise ValueError(
-                    f"hyperkernel_config.embedding_dim ({v.embedding_dim}) must match "
-                    f"first pm_embedding_dims ({expected_dim})"
-                )
-        return v
-
     class Config:
         extra = "forbid"
 
