@@ -5,6 +5,8 @@ from typing import List, Optional, Tuple
 
 from pydantic import BaseModel, Field, field_validator
 
+from .train_logging import get_run_name
+
 
 class HyperkernelConfig(BaseModel):
     """Configuration for Hyperkernel module."""
@@ -194,8 +196,6 @@ class TrainingConfig(BaseModel):
 
         if self.from_checkpoint == "last":
             if not self.run_name:
-                from train_logging import get_run_name
-
                 self.run_name = get_run_name()
 
             last_possible_checkpoint = (

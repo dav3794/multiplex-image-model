@@ -406,6 +406,7 @@ if __name__ == "__main__":
         mask_patch_size=config.mask_patch_size,
         save_checkpoint_every=config.save_checkpoint_freq,
         checkpoints_path=config.checkpoints_dir,
+        beta=config.beta,
     )
 
     finish_experiment()
