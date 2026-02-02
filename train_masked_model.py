@@ -118,7 +118,7 @@ def train_masked(
                 )
                 step += 1
 
-        val_loss = test_masked(
+        test_masked(
             model,
             val_dataloader,
             device,
@@ -128,7 +128,6 @@ def train_masked(
             mask_patch_size=mask_patch_size,
             marker_names_map=marker_names_map,
         )
-        print(f"Validation loss: {val_loss:.4f}")
 
         checkpoint = {
             "model_state_dict": model.state_dict(),
@@ -258,16 +257,26 @@ def test_masked(
         torch.stack([all_channel_variances.flatten(), all_channel_maes.flatten()])
     )[0, 1].item()
 
-    log_validation_metrics(
-        val_loss=val_loss,
-        val_mae=val_mae,
-        val_mse=val_mse,
-        latent_rankme=rankme,
-        epoch=epoch,
-        variance_mae_correlation=variance_mae_corr,
-    )
+    val_metrics = {
+        "val_loss": val_loss,
+        "val_mae": val_mae,
+        "val_mse": val_mse,
+        "latent_rankme": rankme,
+        "variance_mae_correlation": variance_mae_corr,
+        "epoch": epoch       
+    }
 
-    return val_loss
+    log_validation_metrics(**val_metrics)
+
+    print(f"{'='*40} EPOCH {epoch + 1} {'='*40}")
+    print(f"NLL: {val_loss:.4f}")
+    print(f"MAE: {val_mae:.6f}")
+    print(f"MSE: {val_mse:.6f}")
+    print(f"Pearson MAE vs Var: {variance_mae_corr:.4f}")
+    print("="*90)
+    print()
+
+    return val_metrics
 
 
 if __name__ == "__main__":
