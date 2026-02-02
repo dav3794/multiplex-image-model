@@ -66,7 +66,7 @@ def train_masked(
         os.makedirs(checkpoints_path, exist_ok=True)
         print(f"Created checkpoints directory at {checkpoints_path}")
 
-    step = 0
+    step = start_epoch * (len(train_dataloader) // gradient_accumulation_steps)
     for epoch in range(start_epoch, epochs):
         model.train()
         for batch_idx, (img, channel_ids, panel_idx, img_path) in enumerate(
