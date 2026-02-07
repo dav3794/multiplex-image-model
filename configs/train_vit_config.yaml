@@ -1,0 +1,68 @@
+encoder:
+    # marker-agnostic part
+    ma_layers_blocks: []
+    ma_embedding_dims: []
+    
+    # pan-marker part - Vision Transformer
+    pm_layers_blocks: [16]
+    pm_embedding_dims: [512]
+    
+    # Architecture type with ViT-specific parameters
+    encoder_type:
+      type: vit
+      module_parameters: # encoder-level parameters for ViTEncoder
+         patch_size: 1 # Hyperkernel handles patching, 1 means no additional patching
+         block_parameters: # block-level parameters for ViT blocks in encoder
+          num_heads: 8
+
+    hyperkernel:
+      kernel_size: 8
+      padding: 0
+      stride: 8
+      use_bias: true
+
+decoder:
+  decoded_embed_dim: 384
+  num_blocks: 1
+  
+  # Block type with ViT-specific parameters for decoder
+  block_type:
+    type: vit
+    module_parameters: # block-level parameters for ViT blocks in decoder
+       num_heads: 8
+
+  hyperkernel:
+      kernel_size: 1
+      padding: 0
+      stride: 1
+      use_bias: true
+
+# Data configuration
+panel_config: configs/all_panels_config.yaml
+tokenizer_config: configs/all_markers_tokenizer.yaml
+input_image_size: [128, 128]
+num_workers: 8
+batch_size: 8
+
+# Training configuration
+device: cuda
+lr: 5e-4
+final_lr: 1e-5
+weight_decay: 0.0001
+gradient_accumulation_steps: 1
+epochs: 10
+frac_warmup_steps: 0.1
+min_channels_frac: 0.75
+spatial_masking_ratio: 0.6
+fully_masked_channels_max_frac: 0.5
+mask_patch_size: 8
+from_checkpoint: null
+checkpoints_dir: checkpoints
+save_checkpoint_freq: 5
+beta: 0.5
+
+# Comet.ml logging configuration
+tags: [...]
+comet_project: ...
+comet_workspace: ...
+comet_api_key: ...

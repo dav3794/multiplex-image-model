@@ -1,7 +1,7 @@
 import os
 import random
 from glob import glob
-from typing import Dict, Literal
+from typing import Literal
 
 import numpy as np
 import tifffile
@@ -15,9 +15,9 @@ from torchvision.transforms.functional import crop
 class DatasetFromTIFF(Dataset):
     def __init__(
         self,
-        panels_config: Dict,
+        panels_config: dict,
         split: str,
-        marker_tokenizer: Dict[str, int],
+        marker_tokenizer: dict[str, int],
         transform=None,
         use_preprocessing: bool = True,
         use_median_denoising: bool = False,
@@ -31,9 +31,9 @@ class DatasetFromTIFF(Dataset):
         """Dataset for loading multiplex images from multiple panels.
 
         Args:
-            panels_config (Dict): Configuration dictionary for panels.
+            panels_config (dict): Configuration dictionary for panels.
             split (str): Name of the data split (e.g., 'train', 'val', 'test').
-            marker_tokenizer (Dict[str, int]): Tokenizer for marker names.
+            marker_tokenizer (dict[str, int]): Tokenizer for marker names.
             transform (_type_, optional): Transform to be applied to the images. Defaults to None.
             use_preprocessing (bool, optional): Whether to use preprocessing. Defaults to True.
             use_median_denoising (bool, optional): Whether to use median denoising. Defaults to False.
@@ -45,18 +45,18 @@ class DatasetFromTIFF(Dataset):
             use_global_clip_limits (bool, optional): Whether to use global clip limits for all datasets. Defaults to False.
             file_extension (Literal['tiff', 'npy'], optional): File extension of the images. Defaults to 'tiff'.
         """
-        assert (
-            "paths" in panels_config
-        ), "Panels config must have 'paths' attribute with paths of splits of the data."
-        assert (
-            split in panels_config["paths"]
-        ), f"Panels config must have '{split}' attribute with data path."
-        assert (
-            "datasets" in panels_config
-        ), "Panels config must have 'datasets' attribute with subdirectories."
-        assert (
-            "markers" in panels_config
-        ), "Panels config must have 'markers' attribute with channel IDs."
+        assert "paths" in panels_config, (
+            "Panels config must have 'paths' attribute with paths of splits of the data."
+        )
+        assert split in panels_config["paths"], (
+            f"Panels config must have '{split}' attribute with data path."
+        )
+        assert "datasets" in panels_config, (
+            "Panels config must have 'datasets' attribute with subdirectories."
+        )
+        assert "markers" in panels_config, (
+            "Panels config must have 'markers' attribute with channel IDs."
+        )
 
         self.channel_ids = {
             dataset: torch.tensor(

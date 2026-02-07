@@ -5,6 +5,7 @@ from .configuration import (
     DecoderConfig,
     EncoderConfig,
     HyperkernelConfig,
+    ModuleConfig,
     TrainingConfig,
 )
 
@@ -33,6 +34,7 @@ from .train_logging import (
 __all__ = [
     # Configuration
     "HyperkernelConfig",
+    "ModuleConfig",
     "EncoderConfig",
     "DecoderConfig",
     "TrainingConfig",

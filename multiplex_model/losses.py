@@ -18,4 +18,3 @@ def RankMe(features):
     entropy = -torch.sum(p * torch.log(p + 1e-7))
     rank_me = torch.exp(entropy)
     return rank_me
-

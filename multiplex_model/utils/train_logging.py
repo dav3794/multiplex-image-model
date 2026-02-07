@@ -1,22 +1,22 @@
 """Logging and visualization utilities for training and validation."""
 
+import re
+from datetime import datetime
 from io import BytesIO
 from math import ceil
-from datetime import datetime
-from typing import Any, Dict, List, Optional
-import re
+from typing import Any
 
+import comet_ml
 import matplotlib.pyplot as plt
 import numpy as np
-from PIL import Image
 import torch
-from comet_ml import Experiment, API
+from PIL import Image
 
 # Disable PIL's decompression bomb limit
 Image.MAX_IMAGE_PIXELS = None
 
 # Global experiment instance
-_experiment: Optional[Experiment] = None
+_experiment: comet_ml.Experiment | None = None
 
 
 def plot_reconstructs_with_uncertainty(
@@ -25,10 +25,10 @@ def plot_reconstructs_with_uncertainty(
     sigma_plot: torch.Tensor,
     channel_ids: torch.Tensor,
     masked_ids: torch.Tensor,
-    markers_names_map: Dict[int, str],
+    markers_names_map: dict[int, str],
     ncols: int = 9,
     scale_by_max: bool = True,
-    partially_masked_ids: List[int] = [],
+    partially_masked_ids: list[int] = [],
 ):
     """Plot the original image and the reconstructed image with uncertainty.
 
@@ -108,8 +108,8 @@ def plot_reconstructs_with_masks(
     reconstructed_img: torch.Tensor,
     pixel_masks: torch.Tensor,
     channel_ids: torch.Tensor,
-    fully_masked_ids: List[int],
-    markers_names_map: Dict[int, str],
+    fully_masked_ids: list[int],
+    markers_names_map: dict[int, str],
     ncols: int = 9,
 ):
     """Plot the original image, masked image (with white pixels where masked), and reconstruction.
@@ -119,8 +119,8 @@ def plot_reconstructs_with_masks(
         reconstructed_img (torch.Tensor): Reconstructed image [B, C_all, H, W] (all channels)
         pixel_masks (torch.Tensor): Boolean pixel-level masks [B, C_active, H, W] where True = masked
         channel_ids (torch.Tensor): Indices of all channels [B, C_all]
-        fully_masked_ids (List[int]): List of channel IDs that were fully masked (dropped)
-        markers_names_map (Dict[int, str]): Channel index to marker name mapping
+        fully_masked_ids (list[int]): List of channel IDs that were fully masked (dropped)
+        markers_names_map (dict[int, str]): Channel index to marker name mapping
         ncols (int, optional): Number of columns on the plot. Defaults to 9.
 
     Returns:
@@ -224,26 +224,26 @@ def plot_reconstructs_with_masks(
 
 def get_next_version_number(
     project_name: str,
-    workspace: Optional[str] = None,
-    api_key: Optional[str] = None,
+    workspace: str | None = None,
+    api_key: str | None = None,
 ) -> int:
     """Query Comet.ml API to get the next version number for experiments.
-    
+
     Looks for existing experiments with names starting with 'v' followed by a number
     (e.g., 'v1', 'v42', 'v100') and returns the next available version number.
-    
+
     Args:
         project_name (str): Name of the Comet.ml project
-        workspace (Optional[str]): Comet.ml workspace name
-        api_key (Optional[str]): Comet.ml API key (can also use env var COMET_API_KEY)
-    
+        workspace (str | None): Comet.ml workspace name
+        api_key (str | None): Comet.ml API key (can also use env var COMET_API_KEY)
+
     Returns:
         int: Next version number to use
     """
     try:
-        api = API(api_key=api_key)
-        
-        version_pattern = r'^ImVs-(\d+)'
+        api = comet_ml.API(api_key=api_key)
+
+        version_pattern = r"^ImVs-(\d+)"
         # Get all experiments in the project
         experiments = api.get_experiments(
             workspace=workspace,
@@ -264,24 +264,26 @@ def get_next_version_number(
 
         # Return next version (1 if no versions exist)
         return version + 1
-        
+
     except Exception as e:
         print(f"Warning: Could not query Comet.ml for version number: {e}")
         print("Falling back to version 1")
         return 1
 
 
-def init_experiment(config: Dict[str, Any]) -> None:
+def init_experiment(config: dict[str, Any]) -> None:
     """Initialize Comet.ml experiment with the given configuration.
 
     Args:
-        config (Dict[str, Any]): Configuration dictionary containing Comet.ml settings
+        config (dict[str, Any]): Configuration dictionary containing Comet.ml settings
     """
     global _experiment
-    _experiment = Experiment(
+    _experiment = comet_ml.start(
         project_name=config["comet_project"],
         workspace=config.get("comet_workspace"),
-        api_key=config.get("comet_api_key"),  # Can also be set via env var COMET_API_KEY
+        api_key=config.get(
+            "comet_api_key"
+        ),  # Can also be set via env var COMET_API_KEY
     )
     run_name = config.get("run_name", None)
     if run_name is None:
@@ -310,7 +312,7 @@ def log_training_metrics(
     logvar: float,
     mae: float,
     mse: float,
-    step: Optional[int] = None,
+    step: int | None = None,
 ) -> None:
     """Log training metrics to Comet.ml.
 
@@ -321,11 +323,11 @@ def log_training_metrics(
         logvar (float): Log variance
         mae (float): Mean absolute error
         mse (float): Mean squared error
-        step (Optional[int]): Step number for logging
+        step (int | None): Step number for logging
     """
     if _experiment is None:
         return
-    
+
     metrics = {
         "train/loss": loss,
         "train/lr": lr,
@@ -343,7 +345,7 @@ def log_validation_metrics(
     val_mse: float,
     latent_rankme: float,
     epoch: int,
-    variance_mae_correlation: Optional[float] = None,
+    variance_mae_correlation: float | None = None,
 ) -> None:
     """Log validation metrics to Comet.ml.
 
@@ -357,7 +359,7 @@ def log_validation_metrics(
     """
     if _experiment is None:
         return
-    
+
     metrics = {
         "val/loss": val_loss,
         "val/mae": val_mae,
@@ -389,24 +391,24 @@ def log_validation_images(
     """
     if _experiment is None:
         return
-    
+
     # Convert figure to image
     buf = BytesIO()
-    fig.savefig(buf, format='png', dpi=150, bbox_inches='tight')
+    fig.savefig(buf, format="png", dpi=150, bbox_inches="tight")
     buf.seek(0)
     img = Image.open(buf)
-    
+
     _experiment.log_image(
         img,
-        name=f"val/reconstructions_panel-{panel_idx}_epoch-{epoch+1}_img-{img_idx}",
+        name=f"val/reconstructions_panel-{panel_idx}_epoch-{epoch + 1}_img-{img_idx}",
         step=epoch,
         metadata={
             "panel_idx": panel_idx,
             "img_path": img_path,
             "masked_channels": masked_channels_names,
-        }
+        },
     )
-    
+
     buf.close()
 
 
