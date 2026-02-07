@@ -150,6 +150,7 @@ class MultiplexImageEncoder(nn.Module):
         hyperkernel_config: dict,
         pm_layers_blocks: list[int],
         pm_embedding_dims: list[int],
+        use_latent_norm: bool = False,
         encoder_type: str | type[Encoder] | dict = "convnext",
     ):
         """Initialize the Multiplex Image Encoder.
@@ -161,6 +162,7 @@ class MultiplexImageEncoder(nn.Module):
             hyperkernel_config (Dict): Configuration for the hyperkernel.
             pm_layers_blocks (List[int]): Number of blocks in each pan-marker layer.
             pm_embedding_dims (List[int]): Embedding dimensions for each pan-marker layer.
+            use_latent_norm (bool, optional): Whether to apply LayerNorm to the latent representation. Defaults to False.
             encoder_type (Union[str, Type[Encoder], Dict], optional): Type of encoder to use.
                 Can be a string (registry name), Encoder class, or config dict with 'type' and 'module_parameters'.
                 For ConvNeXtEncoder, module_parameters can include 'block_parameters' dict with ConvNextBlock parameters
@@ -211,6 +213,12 @@ class MultiplexImageEncoder(nn.Module):
             **encoder_kwargs,
         )
 
+        self.latent_norm = (
+            LayerNorm(pm_embedding_dims[-1], data_format="channels_first")
+            if use_latent_norm
+            else nn.Identity()
+        )
+
     def forward(
         self,
         x: torch.Tensor,
@@ -246,6 +254,7 @@ class MultiplexImageEncoder(nn.Module):
         if return_features:
             features += x["features"]
         x = x["output"]
+        x = self.latent_norm(x)
 
         outputs["output"] = x
         if return_features:
@@ -265,6 +274,7 @@ class MultiplexImageDecoder(nn.Module):
         scaling_factor: int,
         num_channels: int,
         hyperkernel_config: dict,
+        num_outputs: int = 2,
         block_type: str | type[Block] | dict = "convnext",
     ) -> None:
         """
@@ -275,6 +285,7 @@ class MultiplexImageDecoder(nn.Module):
             scaling_factor (int): Scaling factor for the upsampling.
             num_channels (int): Number of possible output channels/markers.
             hyperkernel_config (dict): Configuration for the hyperkernel.
+            num_outputs (int, optional): Number of output channels per marker. Defaults to 2.
             block_type (str | Type[Block] | dict, optional): Type of block to use.
                 Can be a string (registry name), Block class, or config dict. Defaults to "convnext".
         """
@@ -282,7 +293,7 @@ class MultiplexImageDecoder(nn.Module):
         self.scaling_factor = scaling_factor
         self.num_channels = num_channels
         self.decoded_embed_dim = decoded_embed_dim
-        self.num_outputs = 2
+        self.num_outputs = num_outputs
 
         # Resolve block class and parameters
         block_cls = resolve_block_class(block_type)

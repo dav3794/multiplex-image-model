@@ -73,6 +73,10 @@ class EncoderConfig(BaseModel):
     hyperkernel_config: HyperkernelConfig = Field(
         ..., description="Hyperkernel configuration", alias="hyperkernel"
     )
+    use_latent_norm: bool = Field(
+        default=False,
+        description="Whether to apply LayerNorm to the latent representation",
+    )
     encoder_type: str | ModuleConfig | None = Field(
         default="convnext",
         description=(
@@ -145,6 +149,9 @@ class DecoderConfig(BaseModel):
     )
     hyperkernel_config: HyperkernelConfig = Field(
         ..., description="Hyperkernel configuration", alias="hyperkernel"
+    )
+    num_outputs: int = Field(
+        default=2, gt=0, description="Number of outputs per marker channel"
     )
     block_type: str | ModuleConfig | None = Field(
         default="convnext",

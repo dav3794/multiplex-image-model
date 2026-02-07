@@ -1,7 +1,7 @@
 import os
 import sys
 
-import comet_ml # noqa: F401
+import comet_ml  # noqa: F401
 import matplotlib.pyplot as plt
 import numpy as np
 import torch
@@ -263,17 +263,17 @@ def test_masked(
         "val_mse": val_mse,
         "latent_rankme": rankme,
         "variance_mae_correlation": variance_mae_corr,
-        "epoch": epoch       
+        "epoch": epoch,
     }
 
     log_validation_metrics(**val_metrics)
 
-    print(f"{'='*40} EPOCH {epoch + 1} {'='*40}")
+    print(f"{'=' * 40} EPOCH {epoch + 1} {'=' * 40}")
     print(f"NLL: {val_loss:.4f}")
     print(f"MAE: {val_mae:.6f}")
     print(f"MSE: {val_mse:.6f}")
     print(f"Pearson MAE vs Var: {variance_mae_corr:.4f}")
-    print("="*90)
+    print("=" * 90)
     print()
 
     return val_metrics
