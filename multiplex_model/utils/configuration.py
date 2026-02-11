@@ -74,7 +74,7 @@ class EncoderConfig(BaseModel):
         ..., description="Hyperkernel configuration", alias="hyperkernel"
     )
     use_latent_norm: bool = Field(
-        default=False,
+        default=True,
         description="Whether to apply LayerNorm to the latent representation",
     )
     encoder_type: str | ModuleConfig | None = Field(
