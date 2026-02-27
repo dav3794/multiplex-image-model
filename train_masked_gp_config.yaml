@@ -1,0 +1,71 @@
+# Configuration for training with Gaussian Process-based loss
+# This extends the standard config with GP-specific parameters
+
+# ============================================================================
+# GP LOSS CONFIGURATION
+# ============================================================================
+use_gp_loss: true                    # Enable/disable GP loss
+lambda_gp: 0.1                       # Weight for GP loss (0.0 = only standard, 1.0 = only GP)
+gp_kernel_jitter: 1e-2               # Diagonal noise for numerical stability
+gp_lengthscale: 0.05                  # Spatial correlation length scale
+gp_max_cg_iterations: 50             # Max conjugate gradient iterations
+gp_downscale_factor: 1               # Spatial downsampling (1=none, 2=half, 4=quarter)
+gp_learn_lengthscale: true          # Whether to learn kernel lengthscale
+
+# ============================================================================
+# STANDARD TRAINING CONFIGURATION
+# ============================================================================
+encoder:
+    # marker-agnostic part
+    ma_layers_blocks: [4,]
+    ma_embedding_dims: [16,]
+    # pan-marker part
+    pm_layers_blocks: [4, 4, 4]
+    pm_embedding_dims: [128, 256, 512]
+    use_latent_norm: true
+
+    hyperkernel:
+      kernel_size: 1
+      padding: 0
+      stride: 1
+      use_bias: true
+
+decoder:
+  decoded_embed_dim: 384
+  num_blocks: 1
+
+  hyperkernel:
+      kernel_size: 1
+      padding: 0
+      stride: 1
+      use_bias: true
+
+# Data configuration
+panel_config: configs/all_panels_config.yaml
+tokenizer_config: configs/all_markers_tokenizer.yaml
+input_image_size: [128, 128]
+num_workers: 8
+batch_size: 1
+
+# Training configuration
+device: cuda
+lr: 5e-4
+final_lr: 1e-5
+weight_decay: 0.0001
+gradient_accumulation_steps: 1
+epochs: 10
+frac_warmup_steps: 0.1
+min_channels_frac: 0.75
+spatial_masking_ratio: 0.6
+fully_masked_channels_max_frac: 0.5
+mask_patch_size: 8
+from_checkpoint: null
+checkpoints_dir: checkpoints
+save_checkpoint_freq: 5
+beta: 0.5
+
+# Comet.ml logging configuration
+tags: ['SZARY', 'GP', 'times', 'lambda 0.1']
+comet_project: immuvis
+comet_workspace: 'dav3794'  # optional, can also be set via COMET_WORKSPACE env var
+comet_api_key: '0CY3Gadkm0gRRQQoM3IglrtM7'  # optional, can also be set via COMET_API_KEY env var

@@ -32,6 +32,9 @@ Multiplex-specific Components:
 - MultiplexImageDecoder: Decoder for multiplex images
 - MultiplexAutoencoder: Complete autoencoder model
 
+Gaussian Process Components:
+- LowRankPlusSpatialCovariance: GP covariance module for spatial uncertainty
+
 Registry System:
 - BLOCK_REGISTRY: Registry for block types
 - ENCODER_REGISTRY: Registry for encoder types
@@ -92,6 +95,11 @@ from .immuvis import (
     MultiplexImageEncoder,
 )
 
+# Gaussian Process components
+from .gp_covariance import (
+    LowRankPlusSpatialCovariance,
+)
+
 
 __all__ = [
     # Registry system
@@ -124,4 +132,6 @@ __all__ = [
     "MultiplexImageEncoder",
     "MultiplexImageDecoder",
     "MultiplexAutoencoder",
+    # Gaussian Process components
+    "LowRankPlusSpatialCovariance",
 ]

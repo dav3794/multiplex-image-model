@@ -217,6 +217,29 @@ class TrainingConfig(BaseModel):
     )
     mask_patch_size: int = Field(..., gt=0, description="Size of spatial mask patches")
 
+    # GP Loss parameters
+    use_gp_loss: bool = Field(
+        False, description="Whether to use Gaussian Process loss"
+    )
+    lambda_gp: float = Field(
+        0.1, ge=0, description="Weight for GP loss component"
+    )
+    gp_kernel_jitter: float = Field(
+        1e-2, ge=0, description="Jitter for GP kernel numerical stability"
+    )
+    gp_lengthscale: float = Field(
+        5.0, gt=0, description="Initial lengthscale for spatial Matérn kernel"
+    )
+    gp_max_cg_iterations: int = Field(
+        50, gt=0, description="Maximum CG iterations for GP loss computation"
+    )
+    gp_downscale_factor: int = Field(
+        1, gt=0, description="Downscaling factor for GP loss computation"
+    )
+    gp_learn_lengthscale: bool = Field(
+        False, description="Whether to learn the GP lengthscale parameter"
+    )
+
     # Model architecture
     encoder_config: EncoderConfig = Field(
         ..., description="Encoder configuration", alias="encoder"
@@ -280,4 +303,4 @@ class TrainingConfig(BaseModel):
         return True
 
     class Config:
-        extra = "forbid"  # Raise error on unknown fields
+        extra = "ignore"  # Ignore unknown fields instead of raising error
