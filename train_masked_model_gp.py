@@ -147,23 +147,22 @@ def train_masked_gp(
                 masked_img, spatial_masking_ratio, mask_patch_size
             )
 
-            with autocast(device_type="cuda", dtype=torch.bfloat16):
-                output = model(masked_img, active_channel_ids, channel_ids)["output"]
-                mi, logvar = output.unbind(dim=-1)
-                mi = torch.sigmoid(mi)
-                logvar = ClampWithGrad.apply(logvar, -15.0, 15.0)
+            output = model(masked_img, active_channel_ids, channel_ids)["output"]
+            mi, logvar = output.unbind(dim=-1)
+            mi = torch.sigmoid(mi)
+            logvar = ClampWithGrad.apply(logvar, -15.0, 15.0)
 
-                if use_gp_loss and gp_loss_fn is not None:
-                    # Use hybrid GP loss
-                    loss, loss_dict = gp_loss_fn(img, mi, logvar)
-                    
-                    # Track loss components
-                    for key in loss_dict:
-                        epoch_loss_components[key].append(loss_dict[key])
-                else:
-                    # Fall back to standard beta-NLL loss
-                    loss = beta_nll_loss(img, mi, logvar, beta=beta)
-                    epoch_loss_components["total_loss"].append(loss.item())
+            if use_gp_loss and gp_loss_fn is not None:
+                # Use hybrid GP loss
+                loss, loss_dict = gp_loss_fn(img, mi, logvar)
+                
+                # Track loss components
+                for key in loss_dict:
+                    epoch_loss_components[key].append(loss_dict[key])
+            else:
+                # Fall back to standard beta-NLL loss
+                loss = beta_nll_loss(img, mi, logvar, beta=beta)
+                epoch_loss_components["total_loss"].append(loss.item())
 
             scaler.scale(loss / gradient_accumulation_steps).backward()
 

@@ -5,9 +5,9 @@
 # GP LOSS CONFIGURATION
 # ============================================================================
 use_gp_loss: true                    # Enable/disable GP loss
-lambda_gp: 0.1                       # Weight for GP loss (0.0 = only standard, 1.0 = only GP)
+lambda_gp: 0.0                      # Weight for GP loss (0.0 = only standard, 1.0 = only GP)
 gp_kernel_jitter: 1e-2               # Diagonal noise for numerical stability
-gp_lengthscale: 0.05                  # Spatial correlation length scale
+gp_lengthscale: 0.1                  # Spatial correlation length scale
 gp_max_cg_iterations: 50             # Max conjugate gradient iterations
 gp_downscale_factor: 1               # Spatial downsampling (1=none, 2=half, 4=quarter)
 gp_learn_lengthscale: true          # Whether to learn kernel lengthscale
@@ -43,7 +43,7 @@ decoder:
 # Data configuration
 panel_config: configs/all_panels_config.yaml
 tokenizer_config: configs/all_markers_tokenizer.yaml
-input_image_size: [128, 128]
+input_image_size: [112, 112]
 num_workers: 8
 batch_size: 1
 

@@ -165,14 +165,10 @@ class LowRankTimesSpatialCovariance(nn.Module):
             
         self.spatial_kernel = self.spatial_kernel.to(device)
         
-        # Precompute spatial covariance matrix since grid is fixed
-        self.k_spatial = self.spatial_kernel(grid_coords)
-        
-        # Precompute jitter term
+        # Store grid_coords and jitter as buffers (move with module, no grad)
+        self.register_buffer("grid_coords", grid_coords)
         N = grid_coords.size(0)
-        self.jitter = DiagLinearOperator(
-            torch.ones(N, device=device) * kernel_jitter
-        )
+        self.register_buffer("jitter_val", torch.ones(N, device=device) * kernel_jitter)
 
     def forward(
         self, 
@@ -195,9 +191,17 @@ class LowRankTimesSpatialCovariance(nn.Module):
             sigma = sigma.unsqueeze(-1)
         elif sigma.dim() == 2:
             sigma = sigma.unsqueeze(-1)
-            
+
+        # Compute spatial kernel fresh each forward pass so the computation
+        # graph is recreated (required when lengthscale is learnable).
+        coords = self.grid_coords.to(dtype=sigma.dtype)
+        k_spatial = self.spatial_kernel(coords)
+
         # Low-rank structure: sigma @ sigma^T
         K_low_rank = LowRankRootLinearOperator(sigma)
-        
+
+        # Jitter for numerical stability
+        jitter = DiagLinearOperator(self.jitter_val.to(dtype=sigma.dtype))
+
         # Element-wise multiplication of spatial kernel and low-rank structure
-        return self.k_spatial * K_low_rank + self.jitter
+        return k_spatial * K_low_rank + jitter
