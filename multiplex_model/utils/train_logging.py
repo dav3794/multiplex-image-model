@@ -313,6 +313,8 @@ def log_training_metrics(
     mae: float,
     mse: float,
     step: int | None = None,
+    standard_nll: float | None = None,
+    gp_nll: float | None = None,
 ) -> None:
     """Log training metrics to Comet.ml.
 
@@ -324,6 +326,8 @@ def log_training_metrics(
         mae (float): Mean absolute error
         mse (float): Mean squared error
         step (int | None): Step number for logging
+        standard_nll (float | None): Standard NLL loss component (GP training)
+        gp_nll (float | None): GP-based NLL loss component (GP training)
     """
     if _experiment is None:
         return
@@ -336,6 +340,10 @@ def log_training_metrics(
         "train/mae": mae,
         "train/mse": mse,
     }
+    if standard_nll is not None:
+        metrics["train/standard_nll"] = standard_nll
+    if gp_nll is not None:
+        metrics["train/gp_nll"] = gp_nll
     _experiment.log_metrics(metrics, step=step)
 
 

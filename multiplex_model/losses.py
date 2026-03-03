@@ -100,6 +100,13 @@ class GPNLLLoss(nn.Module):
         """
         B, C, H, W = target.shape
         
+        # GP operations require float32 — they are numerically sensitive
+        # and GPyTorch internals (pivoted Cholesky, CG) can fail with
+        # dtype mismatches under mixed-precision (bfloat16) autocast.
+        target = target.float()
+        mu = mu.float()
+        sigma = sigma.float()
+        
         # Optionally downscale for efficiency
         if self.downscale_factor > 1:
             target = self._downscale_spatial(target)
@@ -143,10 +150,10 @@ class GPNLLLoss(nn.Module):
             nll = -dist.log_prob(target_flat)
             
             # Sum and normalize
-            total_loss = nll.sum()
+            total_loss = nll.mean()
         
         # Average over batch and channels
-        return total_loss / (B * C)
+        return total_loss
 
 
 class HybridGPNLLLoss(nn.Module):
