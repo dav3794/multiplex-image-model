@@ -66,6 +66,6 @@ beta: 0.5
 
 # Comet.ml logging configuration
 tags: ['SZARY', 'GP', 'times', 'lambda 0.1']
-comet_project: immuvis
-comet_workspace: 'dav3794'  # optional, can also be set via COMET_WORKSPACE env var
-comet_api_key: '0CY3Gadkm0gRRQQoM3IglrtM7'  # optional, can also be set via COMET_API_KEY env var
+comet_project: ...
+comet_workspace: ...  # optional, can also be set via COMET_WORKSPACE env var
+comet_api_key: ...  # optional, can also be set via COMET_API_KEY env var
