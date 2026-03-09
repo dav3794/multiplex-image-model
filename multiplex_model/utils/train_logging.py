@@ -229,8 +229,9 @@ def get_next_version_number(
 ) -> int:
     """Query Comet.ml API to get the next version number for experiments.
 
-    Looks for existing experiments with names starting with 'v' followed by a number
-    (e.g., 'v1', 'v42', 'v100') and returns the next available version number.
+    Looks for existing experiments with names matching the pattern 'ImVs-' followed
+    by a number (e.g., 'ImVs-1', 'ImVs-42', 'ImVs-100') and returns the next
+    available version number.
 
     Args:
         project_name (str): Name of the Comet.ml project
@@ -253,16 +254,15 @@ def get_next_version_number(
             sort_order="desc",
         )
 
-        # Extract version numbers from experiment names
+        # Return next version (1 if no versions exist)
         if not experiments:
-            return 0
+            return 1
 
         latest_experiment = experiments[0]
 
         version = re.match(version_pattern, latest_experiment.name)
         version = int(version.group(1))
 
-        # Return next version (1 if no versions exist)
         return version + 1
 
     except Exception as e:
