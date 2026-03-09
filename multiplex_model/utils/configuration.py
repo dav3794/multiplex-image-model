@@ -3,7 +3,7 @@
 import os
 from typing import Any
 
-from pydantic import BaseModel, Field, field_validator
+from pydantic import BaseModel, ConfigDict, Field, field_validator
 
 from .train_logging import get_run_name
 
@@ -39,8 +39,7 @@ class ModuleConfig(BaseModel):
         else:
             raise ValueError(f"ModuleConfig must be string or dict, got {type(value)}")
 
-    class Config:
-        extra = "forbid"
+    model_config = ConfigDict(extra="forbid")
 
 
 class HyperkernelConfig(BaseModel):
@@ -51,8 +50,7 @@ class HyperkernelConfig(BaseModel):
     stride: int = Field(1, gt=0, description="Stride for convolution")
     use_bias: bool = Field(True, description="Whether to use bias in the hyperkernel")
 
-    class Config:
-        extra = "forbid"
+    model_config = ConfigDict(extra="forbid")
 
 
 class EncoderConfig(BaseModel):
@@ -134,8 +132,7 @@ class EncoderConfig(BaseModel):
                 )
         return v
 
-    class Config:
-        extra = "forbid"
+    model_config = ConfigDict(extra="forbid")
 
 
 class DecoderConfig(BaseModel):
@@ -167,8 +164,7 @@ class DecoderConfig(BaseModel):
             return v
         return ModuleConfig.from_string_or_dict(v)
 
-    class Config:
-        extra = "forbid"
+    model_config = ConfigDict(extra="forbid")
 
 
 class TrainingConfig(BaseModel):
@@ -279,5 +275,4 @@ class TrainingConfig(BaseModel):
 
         return True
 
-    class Config:
-        extra = "forbid"  # Raise error on unknown fields
+    model_config = ConfigDict(extra="forbid")  # Raise error on unknown fields
