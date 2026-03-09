@@ -59,7 +59,7 @@ from .base_modules import (
 )
 
 # ConvNeXt architecture
-from .convext import (
+from .convnext import (
     ConvNextBlock,
     ConvNeXtEncoder,
     GlobalResponseNormalization,
