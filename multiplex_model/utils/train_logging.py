@@ -1,0 +1,429 @@
+"""Logging and visualization utilities for training and validation."""
+
+import re
+from datetime import datetime
+from io import BytesIO
+from math import ceil
+from typing import Any
+
+import comet_ml
+import matplotlib.pyplot as plt
+import numpy as np
+import torch
+from PIL import Image
+
+# Disable PIL's decompression bomb limit
+Image.MAX_IMAGE_PIXELS = None
+
+# Global experiment instance
+_experiment: comet_ml.Experiment | None = None
+
+
+def plot_reconstructs_with_uncertainty(
+    orig_img: torch.Tensor,
+    reconstructed_img: torch.Tensor,
+    sigma_plot: torch.Tensor,
+    channel_ids: torch.Tensor,
+    masked_ids: torch.Tensor,
+    markers_names_map: dict[int, str],
+    ncols: int = 9,
+    scale_by_max: bool = True,
+    partially_masked_ids: list[int] = [],
+):
+    """Plot the original image and the reconstructed image with uncertainty.
+
+    Args:
+        orig_img (torch.Tensor): Original image
+        reconstructed_img (torch.Tensor): Reconstructed image
+        sigma_plot (torch.Tensor): Uncertainty image
+        channel_ids (torch.Tensor): Indices of the original channels
+        masked_ids (torch.Tensor): Indices of the masked/reconstructed channels
+        markers_names_map (Dict[int, str]): Channel index to marker name mapping
+        ncols (int, optional): Number of columns on the plot. Defaults to 9.
+        scale_by_max (bool, optional): Whether to scale the images by their maximum value. Defaults to True.
+        partially_masked_ids (List[int], optional): List of channel IDs that were only partially masked. Defaults to [].
+
+    Returns:
+        matplotlib.figure.Figure: The generated figure
+    """
+    # plot original image
+    num_channels = orig_img.shape[1]
+
+    nrows = ceil(num_channels / (ncols // 3))
+    fig_orig, axs_orig = plt.subplots(nrows, ncols, figsize=(ncols * 2, nrows * 2))
+    ax_flat = axs_orig.flatten()
+    for i in range(0, len(ax_flat), 3):
+        j = i // 3
+
+        # first original image
+        ax_img = ax_flat[i]
+        ax_img.axis("off")
+
+        ax_reconstructed = ax_flat[i + 1]
+        ax_reconstructed.axis("off")
+
+        ax_uncertainty = ax_flat[i + 2]
+        ax_uncertainty.axis("off")
+
+        if j < num_channels:
+            marker_name = markers_names_map[channel_ids[0, j].item()]
+            ax_img.imshow(orig_img[0, j].cpu().numpy(), cmap="CMRmap", vmin=0, vmax=1)
+            ax_img.set_title(f"Original\n{marker_name}")
+
+            ax_reconstructed.imshow(
+                reconstructed_img[0, j].cpu().numpy(), cmap="CMRmap", vmin=0, vmax=1
+            )
+            is_masked = channel_ids[0, j].item() in masked_ids
+            is_partially_masked = channel_ids[0, j].item() in partially_masked_ids
+            if is_partially_masked:
+                masked_str = " (partially masked)"
+            elif is_masked:
+                masked_str = " (masked)"
+            else:
+                masked_str = ""
+            ax_reconstructed.set_title(f"Reconstructed{masked_str}\n{marker_name}")
+
+            if scale_by_max:
+                var_min = sigma_plot[0, j].min().item()
+                var_max = sigma_plot[0, j].max().item()
+            else:
+                var_min = None
+                var_max = None
+
+            ax_uncertainty.imshow(
+                sigma_plot[0, j].cpu().numpy(),
+                cmap="CMRmap",
+                vmin=var_min,
+                vmax=var_max,
+            )
+            ax_uncertainty.set_title(f"Variance\n{marker_name}")
+
+    fig_orig.tight_layout()
+
+    return fig_orig
+
+
+def plot_reconstructs_with_masks(
+    orig_img: torch.Tensor,
+    reconstructed_img: torch.Tensor,
+    pixel_masks: torch.Tensor,
+    channel_ids: torch.Tensor,
+    fully_masked_ids: list[int],
+    markers_names_map: dict[int, str],
+    ncols: int = 9,
+):
+    """Plot the original image, masked image (with white pixels where masked), and reconstruction.
+
+    Args:
+        orig_img (torch.Tensor): Original image [B, C, H, W]
+        reconstructed_img (torch.Tensor): Reconstructed image [B, C_all, H, W] (all channels)
+        pixel_masks (torch.Tensor): Boolean pixel-level masks [B, C_active, H, W] where True = masked
+        channel_ids (torch.Tensor): Indices of all channels [B, C_all]
+        fully_masked_ids (list[int]): List of channel IDs that were fully masked (dropped)
+        markers_names_map (dict[int, str]): Channel index to marker name mapping
+        ncols (int, optional): Number of columns on the plot. Defaults to 9.
+
+    Returns:
+        matplotlib.figure.Figure: The generated figure
+    """
+    num_channels = orig_img.shape[1]
+
+    nrows = ceil(num_channels / (ncols // 3))
+    fig, axs = plt.subplots(nrows, ncols, figsize=(ncols * 2, nrows * 2))
+    ax_flat = axs.flatten()
+
+    # Create mapping from channel_id to index in masked_img
+    active_channel_ids = [
+        cid for cid in channel_ids[0].tolist() if cid not in fully_masked_ids
+    ]
+    channel_to_masked_idx = {cid: idx for idx, cid in enumerate(active_channel_ids)}
+
+    for i in range(0, len(ax_flat), 3):
+        j = i // 3
+
+        ax_orig = ax_flat[i]
+
+        ax_masked = ax_flat[i + 1]
+
+        ax_reconstructed = ax_flat[i + 2]
+
+        if j < num_channels:
+            channel_id = channel_ids[0, j].item()
+            marker_name = markers_names_map[channel_id]
+
+            # Show original
+            ax_orig.imshow(orig_img[0, j].cpu().numpy(), cmap="CMRmap", vmin=0, vmax=1)
+            ax_orig.set_title(f"Original\n{marker_name}")
+            ax_orig.set_xticks([])
+            ax_orig.set_yticks([])
+            # Add black frame
+            for spine in ax_orig.spines.values():
+                spine.set_edgecolor("black")
+                spine.set_linewidth(1)
+                spine.set_visible(True)
+
+            # Show masked version
+            if channel_id in fully_masked_ids:
+                # Fully masked channel - show all white (RGBA)
+                white_img = np.ones((*orig_img[0, j].shape, 4))
+                white_img[..., :3] = 1.0  # RGB = white
+                white_img[..., 3] = 1.0  # Alpha = 100% opaque
+                ax_masked.imshow(white_img)
+                ax_masked.set_title(f"Masked (fully)\n{marker_name}")
+                ax_masked.set_xticks([])
+                ax_masked.set_yticks([])
+                # Add black frame
+                for spine in ax_masked.spines.values():
+                    spine.set_edgecolor("black")
+                    spine.set_linewidth(1)
+                    spine.set_visible(True)
+            else:
+                # Partially masked channel - show with white pixels where masked
+                masked_idx = channel_to_masked_idx[channel_id]
+
+                # Convert grayscale to RGBA using colormap (image already normalized to 0-1)
+                cmap = plt.cm.CMRmap
+                img_data = orig_img[0, j].cpu().numpy()
+                rgba_img = cmap(img_data)  # Apply colormap directly
+
+                # Set masked pixels to pure white with 100% opacity
+                mask_np = pixel_masks[0, masked_idx].cpu().numpy()
+                rgba_img[mask_np] = [1.0, 1.0, 1.0, 1.0]  # Pure white, fully opaque
+
+                ax_masked.imshow(rgba_img)
+                ax_masked.set_title(f"Masked\n{marker_name}")
+                ax_masked.set_xticks([])
+                ax_masked.set_yticks([])
+                # Add black frame
+                for spine in ax_masked.spines.values():
+                    spine.set_edgecolor("black")
+                    spine.set_linewidth(1)
+                    spine.set_visible(True)
+
+            # Show reconstruction
+            ax_reconstructed.imshow(
+                reconstructed_img[0, j].cpu().numpy(), cmap="CMRmap", vmin=0, vmax=1
+            )
+            ax_reconstructed.set_title(f"Reconstructed\n{marker_name}")
+            ax_reconstructed.set_xticks([])
+            ax_reconstructed.set_yticks([])
+            # Add black frame
+            for spine in ax_reconstructed.spines.values():
+                spine.set_edgecolor("black")
+                spine.set_linewidth(1)
+                spine.set_visible(True)
+        else:
+            # Turn off empty subplots
+            ax_orig.axis("off")
+            ax_masked.axis("off")
+            ax_reconstructed.axis("off")
+
+    fig.tight_layout()
+    return fig
+
+
+def get_next_version_number(
+    project_name: str,
+    workspace: str | None = None,
+    api_key: str | None = None,
+) -> int:
+    """Query Comet.ml API to get the next version number for experiments.
+
+    Looks for existing experiments with names matching the pattern 'ImVs-' followed
+    by a number (e.g., 'ImVs-1', 'ImVs-42', 'ImVs-100') and returns the next
+    available version number.
+
+    Args:
+        project_name (str): Name of the Comet.ml project
+        workspace (str | None): Comet.ml workspace name
+        api_key (str | None): Comet.ml API key (can also use env var COMET_API_KEY)
+
+    Returns:
+        int: Next version number to use
+    """
+    try:
+        api = comet_ml.API(api_key=api_key)
+
+        version_pattern = r"^ImVs-(\d+)"
+        # Get all experiments in the project
+        experiments = api.get_experiments(
+            workspace=workspace,
+            project_name=project_name,
+            pattern=version_pattern,
+            sort_by="startTime",
+            sort_order="desc",
+        )
+
+        # Return next version (1 if no versions exist)
+        if not experiments:
+            return 1
+
+        latest_experiment = experiments[0]
+
+        version = re.match(version_pattern, latest_experiment.name)
+        version = int(version.group(1))
+
+        return version + 1
+
+    except Exception as e:
+        print(f"Warning: Could not query Comet.ml for version number: {e}")
+        print("Falling back to version 1")
+        return 1
+
+
+def init_experiment(config: dict[str, Any]) -> None:
+    """Initialize Comet.ml experiment with the given configuration.
+
+    Args:
+        config (dict[str, Any]): Configuration dictionary containing Comet.ml settings
+    """
+    global _experiment
+    _experiment = comet_ml.start(
+        project_name=config["comet_project"],
+        workspace=config.get("comet_workspace"),
+        api_key=config.get(
+            "comet_api_key"
+        ),  # Can also be set via env var COMET_API_KEY
+    )
+    run_name = config.get("run_name", None)
+    if run_name is None:
+        # Get next version number from Comet.ml
+        if config.get("use_versioning", True):
+            version = get_next_version_number(
+                project_name=config["comet_project"],
+                workspace=config.get("comet_workspace"),
+                api_key=config.get("comet_api_key"),
+            )
+            run_name = f"ImVs-{version}"
+        else:
+            # Fallback to date-time as default run name
+            run_name = datetime.now().strftime("%m%d_%H:%M:%S")
+
+    print(f"Run name: {run_name}")
+    _experiment.set_name(run_name)
+    _experiment.add_tags(config.get("tags", []))
+    _experiment.log_parameters(config)
+
+
+def log_training_metrics(
+    loss: float,
+    lr: float,
+    mu: float,
+    logvar: float,
+    mae: float,
+    mse: float,
+    step: int | None = None,
+) -> None:
+    """Log training metrics to Comet.ml.
+
+    Args:
+        loss (float): Training loss
+        lr (float): Learning rate
+        mu (float): Mean of predicted values
+        logvar (float): Log variance
+        mae (float): Mean absolute error
+        mse (float): Mean squared error
+        step (int | None): Step number for logging
+    """
+    if _experiment is None:
+        return
+
+    metrics = {
+        "train/loss": loss,
+        "train/lr": lr,
+        "train/µ": mu,
+        "train/logvar": logvar,
+        "train/mae": mae,
+        "train/mse": mse,
+    }
+    _experiment.log_metrics(metrics, step=step)
+
+
+def log_validation_metrics(
+    val_loss: float,
+    val_mae: float,
+    val_mse: float,
+    latent_rankme: float,
+    epoch: int,
+    variance_mae_correlation: float | None = None,
+) -> None:
+    """Log validation metrics to Comet.ml.
+
+    Args:
+        val_loss (float): Validation loss
+        val_mae (float): Validation MAE
+        val_mse (float): Validation MSE
+        latent_rankme (float): RankMe metric for latent representations
+        epoch (int): Current epoch number
+        variance_mae_correlation (Optional[float]): Pearson correlation between predicted variances and MAEs per channel
+    """
+    if _experiment is None:
+        return
+
+    metrics = {
+        "val/loss": val_loss,
+        "val/mae": val_mae,
+        "val/mse": val_mse,
+        "val/latent_RankMe": latent_rankme,
+    }
+    if variance_mae_correlation is not None:
+        metrics["val/variance_mae_correlation"] = variance_mae_correlation
+    _experiment.log_metrics(metrics, epoch=epoch)
+
+
+def log_validation_images(
+    fig: plt.Figure,
+    panel_idx: int,
+    img_path: str,
+    epoch: int,
+    masked_channels_names: str,
+    img_idx: int,
+) -> None:
+    """Log validation reconstruction images to Comet.ml.
+
+    Args:
+        fig (plt.Figure): Matplotlib figure to log
+        panel_idx (int): Panel index
+        img_path (str): Path to the image
+        epoch (int): Current epoch number
+        masked_channels_names (str): Names of masked channels
+        img_idx (int): Index of the image in the batch
+    """
+    if _experiment is None:
+        return
+
+    # Convert figure to image
+    buf = BytesIO()
+    fig.savefig(buf, format="png", dpi=150, bbox_inches="tight")
+    buf.seek(0)
+    img = Image.open(buf)
+
+    _experiment.log_image(
+        img,
+        name=f"val/reconstructions_panel-{panel_idx}_epoch-{epoch + 1}_img-{img_idx}",
+        step=epoch,
+        metadata={
+            "panel_idx": panel_idx,
+            "img_path": img_path,
+            "masked_channels": masked_channels_names,
+        },
+    )
+
+    buf.close()
+
+
+def get_run_name() -> str:
+    """Get the current Comet.ml experiment name.
+
+    Returns:
+        str : Current experiment name or "unknown" if no experiment is active
+    """
+    return _experiment.get_name() if _experiment else "unknown"
+
+
+def finish_experiment() -> None:
+    """Finish the current Comet.ml experiment."""
+    global _experiment
+    if _experiment is not None:
+        _experiment.end()
+        _experiment = None

@@ -209,3 +209,7 @@ __marimo__/
 data/
 venv/
 checkpoints/ 
+
+*.out
+*.err
+*.log
