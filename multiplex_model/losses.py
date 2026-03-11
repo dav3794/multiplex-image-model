@@ -304,10 +304,9 @@ class KroneckerGPNLLLoss(nn.Module):
         B, C, H, W = target.shape
         N = H * W
 
-        assert N == self.covariance_module.N, (
-            f"Image size {H}×{W}={N} does not match "
-            f"KroneckerPlusSpatialCovariance grid_size²="
-            f"{self.covariance_module.N}. "
+        assert H == W == self.covariance_module.grid_size, (
+            f"Image must be square with H == W == grid_size, "
+            f"got {H}×{W} vs grid_size={self.covariance_module.grid_size}. "
             f"Check downscale_factor or grid_size."
         )
 

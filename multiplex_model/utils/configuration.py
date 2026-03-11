@@ -239,6 +239,9 @@ class TrainingConfig(BaseModel):
     gp_learn_lengthscale: bool = Field(
         False, description="Whether to learn the GP lengthscale parameter"
     )
+    use_kronecker_gp: bool = Field(
+        False, description="Whether to use Kronecker GP loss instead of CG-based GP loss"
+    )
 
     # Model architecture
     encoder_config: EncoderConfig = Field(
