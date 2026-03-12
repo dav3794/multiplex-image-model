@@ -27,8 +27,17 @@ from torchvision.transforms.functional import InterpolationMode
 from tqdm import tqdm
 
 from multiplex_model.data import DatasetFromTIFF, PanelBatchSampler, TestCrop
-from multiplex_model.losses import HybridGPNLLLoss, RankMe, beta_nll_loss, nll_loss
-from multiplex_model.modules.gp_covariance import LowRankTimesSpatialCovariance
+from multiplex_model.losses import (
+    HybridGPNLLLoss,
+    HybridKroneckerGPNLLLoss,
+    RankMe,
+    beta_nll_loss,
+    nll_loss,
+)
+from multiplex_model.modules.gp_covariance import (
+    KroneckerPlusSpatialCovariance,
+    LowRankTimesSpatialCovariance,
+)
 from multiplex_model.modules import MultiplexAutoencoder
 from multiplex_model.utils import (
     ClampWithGrad,
@@ -108,14 +117,23 @@ def train_masked_gp(
     # Initialize GP loss if enabled
     gp_loss_fn = None
     if use_gp_loss and gp_covariance_module is not None:
-        gp_loss_fn = HybridGPNLLLoss(
-            covariance_module=gp_covariance_module,
-            lambda_gp=lambda_gp,
-            max_cg_iterations=gp_max_cg_iterations,
-            downscale_factor=gp_downscale_factor,
-            device=device,
-        )
-        print(f"Using GP loss with lambda_gp={lambda_gp}")
+        if isinstance(gp_covariance_module, KroneckerPlusSpatialCovariance):
+            gp_loss_fn = HybridKroneckerGPNLLLoss(
+                covariance_module=gp_covariance_module,
+                lambda_gp=lambda_gp,
+                downscale_factor=gp_downscale_factor,
+                device=device,
+            )
+            print(f"Using Kronecker GP loss with lambda_gp={lambda_gp}")
+        else:
+            gp_loss_fn = HybridGPNLLLoss(
+                covariance_module=gp_covariance_module,
+                lambda_gp=lambda_gp,
+                max_cg_iterations=gp_max_cg_iterations,
+                downscale_factor=gp_downscale_factor,
+                device=device,
+            )
+            print(f"Using CG GP loss with lambda_gp={lambda_gp}")
 
     step = start_epoch * (len(train_dataloader) // gradient_accumulation_steps)
     
@@ -481,44 +499,58 @@ if __name__ == "__main__":
     ).to(device)
 
     # GP Loss Configuration
-    use_gp_loss = getattr(config, "use_gp_loss", False)
-    lambda_gp = getattr(config, "lambda_gp", 0.1)
-    gp_kernel_jitter = getattr(config, "gp_kernel_jitter", 1e-2)
-    gp_lengthscale = getattr(config, "gp_lengthscale", 5.0)
+    use_gp_loss          = getattr(config, "use_gp_loss", False)
+    use_kronecker_gp     = getattr(config, "use_kronecker_gp", False)
+    lambda_gp            = getattr(config, "lambda_gp", 0.1)
+    gp_kernel_jitter     = getattr(config, "gp_kernel_jitter", 1e-2)
+    gp_lengthscale       = getattr(config, "gp_lengthscale", 5.0)
     gp_max_cg_iterations = getattr(config, "gp_max_cg_iterations", 50)
-    gp_downscale_factor = getattr(config, "gp_downscale_factor", 1)
+    gp_downscale_factor  = getattr(config, "gp_downscale_factor", 1)
     gp_learn_lengthscale = getattr(config, "gp_learn_lengthscale", False)
 
     print("\nGP Loss Configuration:")
-    print(f"  Use GP Loss: {use_gp_loss}")
-    print(f"  Lambda GP: {lambda_gp}")
-    print(f"  Kernel Jitter: {gp_kernel_jitter}")
-    print(f"  Lengthscale: {gp_lengthscale}")
-    print(f"  Max CG Iterations: {gp_max_cg_iterations}")
-    print(f"  Downscale Factor: {gp_downscale_factor}")
-    print(f"  Learn Lengthscale: {gp_learn_lengthscale}\n")
+    print(f"  Use GP Loss:         {use_gp_loss}")
+    print(f"  Use Kronecker GP:    {use_kronecker_gp}")
+    print(f"  Lambda GP:           {lambda_gp}")
+    print(f"  Kernel Jitter:       {gp_kernel_jitter}")
+    print(f"  Lengthscale:         {gp_lengthscale}")
+    print(f"  Max CG Iterations:   {gp_max_cg_iterations}  (ignored for Kronecker)")
+    print(f"  Downscale Factor:    {gp_downscale_factor}")
+    print(f"  Learn Lengthscale:   {gp_learn_lengthscale}  (ignored for Kronecker)\n")
 
     # Initialize GP covariance module
     gp_covariance_module = None
     if use_gp_loss:
-        # Create grid coordinates for GP
         H, W = SIZE
         H_gp = H // gp_downscale_factor
         W_gp = W // gp_downscale_factor
-        
-        # Create meshgrid [0, 1] normalized
-        y = torch.linspace(0, 1, H_gp, device=device)
-        x = torch.linspace(0, 1, W_gp, device=device)
-        Y, X = torch.meshgrid(y, x, indexing="ij")
-        grid_coords = torch.stack([Y, X], dim=-1).reshape(-1, 2)
 
-        gp_covariance_module = LowRankTimesSpatialCovariance(
-            grid_coords=grid_coords,
-            kernel_jitter=gp_kernel_jitter,
-            spatial_matern_kernel_length_scale=gp_lengthscale,
-            learn_lengthscale=gp_learn_lengthscale,
-            device=device,
-        )
+        if use_kronecker_gp:
+            # Kronecker requires square images after downscaling
+            assert H_gp == W_gp, (
+                f"Kronecker GP requires square spatial grid, "
+                f"got {H_gp}×{W_gp}. Adjust input_image_size or gp_downscale_factor."
+            )
+            gp_covariance_module = KroneckerPlusSpatialCovariance(
+                grid_size=H_gp,
+                kernel_jitter=gp_kernel_jitter,
+                spatial_matern_kernel_length_scale=gp_lengthscale,
+                device=device,
+            )
+        else:
+            # CG-based covariance (supports learnable lengthscale)
+            y = torch.linspace(0, 1, H_gp, device=device)
+            x = torch.linspace(0, 1, W_gp, device=device)
+            Y, X = torch.meshgrid(y, x, indexing="ij")
+            grid_coords = torch.stack([Y, X], dim=-1).reshape(-1, 2)
+
+            gp_covariance_module = LowRankTimesSpatialCovariance(
+                grid_coords=grid_coords,
+                kernel_jitter=gp_kernel_jitter,
+                spatial_matern_kernel_length_scale=gp_lengthscale,
+                learn_lengthscale=gp_learn_lengthscale,
+                device=device,
+            )
 
     # Optimizer and scheduler
     total_steps = (
@@ -549,12 +581,13 @@ if __name__ == "__main__":
     # Initialize experiment tracking
     comet_config = config.model_dump()
     comet_config.update({
-        "use_gp_loss": use_gp_loss,
-        "lambda_gp": lambda_gp,
-        "gp_kernel_jitter": gp_kernel_jitter,
-        "gp_lengthscale": gp_lengthscale,
+        "use_gp_loss":          use_gp_loss,
+        "use_kronecker_gp":     use_kronecker_gp,
+        "lambda_gp":            lambda_gp,
+        "gp_kernel_jitter":     gp_kernel_jitter,
+        "gp_lengthscale":       gp_lengthscale,
         "gp_max_cg_iterations": gp_max_cg_iterations,
-        "gp_downscale_factor": gp_downscale_factor,
+        "gp_downscale_factor":  gp_downscale_factor,
         "gp_learn_lengthscale": gp_learn_lengthscale,
     })
     init_experiment(comet_config)
