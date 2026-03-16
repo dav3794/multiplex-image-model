@@ -516,7 +516,7 @@ if __name__ == "__main__":
     print(f"  Lengthscale:         {gp_lengthscale}")
     print(f"  Max CG Iterations:   {gp_max_cg_iterations}  (ignored for Kronecker)")
     print(f"  Downscale Factor:    {gp_downscale_factor}")
-    print(f"  Learn Lengthscale:   {gp_learn_lengthscale}  (ignored for Kronecker)\n")
+    print(f"  Learn Lengthscale:   {gp_learn_lengthscale}\n")
 
     # Initialize GP covariance module
     gp_covariance_module = None
@@ -535,6 +535,7 @@ if __name__ == "__main__":
                 grid_size=H_gp,
                 kernel_jitter=gp_kernel_jitter,
                 spatial_matern_kernel_length_scale=gp_lengthscale,
+                learn_lengthscale=gp_learn_lengthscale,
                 device=device,
             )
         else:

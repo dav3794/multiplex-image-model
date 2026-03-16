@@ -225,9 +225,10 @@ class KroneckerPlusSpatialCovariance(nn.Module):
     - log_prob_all_markers batches all C channels in a single A⁻¹ call
     - Complexity: O(n³) init, O(n²·C) per image vs O(n²·C·CG_iters) for CG
 
-    Constraint: does not support learnable lengthscale. The eigendecomposition
-    is computed at init and cached for the lifetime of the module. If the
-    lengthscale needs tuning, set it before instantiation.
+    When learn_lengthscale=True the 1D kernel is stored as a submodule so its
+    raw_lengthscale participates in gradient updates. The eigendecomposition is
+    then recomputed each forward pass (adds one O(n³) eigh call per step).
+    When learn_lengthscale=False the eigens are cached at init (original behaviour).
     """
 
     def __init__(
@@ -236,6 +237,7 @@ class KroneckerPlusSpatialCovariance(nn.Module):
         kernel_jitter: float = 1e-2,
         spatial_matern_kernel_nu: float = 1.5,
         spatial_matern_kernel_length_scale: float = 5.0,
+        learn_lengthscale: bool = False,
         device=None,
     ):
         """
@@ -249,6 +251,8 @@ class KroneckerPlusSpatialCovariance(nn.Module):
             spatial_matern_kernel_nu: Matérn smoothness (0.5 / 1.5 / 2.5).
             spatial_matern_kernel_length_scale: Spatial correlation range in
                 normalised [0, 1] coordinates.
+            learn_lengthscale: If True, raw_lengthscale is a trainable parameter
+                and the eigendecomposition is recomputed each forward pass.
             device: Computation device.
         """
         super().__init__()
@@ -258,32 +262,52 @@ class KroneckerPlusSpatialCovariance(nn.Module):
         self.kernel_jitter = kernel_jitter
         self.grid_size = grid_size
         self.N = grid_size * grid_size
+        self.learn_lengthscale = learn_lengthscale
 
         # 1D grid in [0, 1] — same for both axes (separable kernel)
         x1d = torch.linspace(0, 1, grid_size, device=device).unsqueeze(-1)
+        self.register_buffer("x1d", x1d)
 
-        k1d = gpytorch.kernels.MaternKernel(nu=spatial_matern_kernel_nu).to(device)
-        k1d.lengthscale = spatial_matern_kernel_length_scale
-        # Fix lengthscale — Kronecker approach does not support online updates
-        k1d.raw_lengthscale.requires_grad = False
+        # Store kernel as a submodule so its parameters appear in state_dict
+        # and are included in optimizer parameter groups.
+        self.k1d = gpytorch.kernels.MaternKernel(nu=spatial_matern_kernel_nu).to(device)
+        self.k1d.lengthscale = spatial_matern_kernel_length_scale
 
-        with torch.no_grad():
-            K1d = k1d(x1d).evaluate()            # [n, n]
-            lam, V = torch.linalg.eigh(K1d)      # K1d = V diag(lam) Vᵀ
-
-        self.register_buffer("lam", lam)          # [n]
-        self.register_buffer("V", V)              # [n, n]
-
-        # Kronecker eigenvalues of (K_x ⊗ K_y + jitter·I): λᵢ·λⱼ + jitter
-        # Jitter is absorbed here so _A_solve is a pure arithmetic operation.
-        kron_eigs = torch.outer(lam, lam) + kernel_jitter   # [n, n]
-        self.register_buffer("kron_eigs", kron_eigs)
+        if not learn_lengthscale:
+            self.k1d.raw_lengthscale.requires_grad = False
+            # Precompute and cache eigendecomposition
+            with torch.no_grad():
+                K1d = self.k1d(x1d).evaluate()       # [n, n]
+                lam, V = torch.linalg.eigh(K1d)      # K1d = V diag(lam) Vᵀ
+            self.register_buffer("_V_cached", V)
+            kron_eigs = torch.outer(lam, lam) + kernel_jitter
+            self.register_buffer("_kron_eigs_cached", kron_eigs)
+        else:
+            self.register_buffer("_V_cached", None)
+            self.register_buffer("_kron_eigs_cached", None)
 
     # ------------------------------------------------------------------
-    # Internal solver
+    # Internal helpers
     # ------------------------------------------------------------------
 
-    def _A_solve(self, v: torch.Tensor) -> torch.Tensor:
+    def _compute_eigens(self):
+        """
+        Return (V, kron_eigs) for the current lengthscale.
+
+        If learn_lengthscale=False, returns cached buffers (no graph built).
+        If learn_lengthscale=True, recomputes K1d via the kernel module so that
+        gradients flow back through raw_lengthscale.
+        """
+        if not self.learn_lengthscale:
+            return self._V_cached, self._kron_eigs_cached
+
+        x1d = self.x1d.to(dtype=torch.get_default_dtype())
+        K1d = self.k1d(x1d).evaluate()                  # [n, n]
+        lam, V = torch.linalg.eigh(K1d)                 # differentiable
+        kron_eigs = torch.outer(lam, lam) + self.kernel_jitter
+        return V, kron_eigs
+
+    def _A_solve(self, v: torch.Tensor, V: torch.Tensor, kron_eigs: torch.Tensor) -> torch.Tensor:
         """
         Solve A⁻¹v where A = K_x ⊗ K_y + jitter·I, analytically.
 
@@ -294,6 +318,8 @@ class KroneckerPlusSpatialCovariance(nn.Module):
 
         Args:
             v: [N] or [N, m]
+            V: [n, n] eigenvector matrix from _compute_eigens
+            kron_eigs: [n, n] Kronecker eigenvalues from _compute_eigens
 
         Returns:
             A⁻¹v, same shape as v.
@@ -306,13 +332,13 @@ class KroneckerPlusSpatialCovariance(nn.Module):
 
         V3  = v.reshape(n, n, m)
         # (V⊗V)ᵀ v  ≡  V.T @ V3 @ V  (eigenvectors on both axes)
-        tmp = torch.einsum("abm,bj->ajm", V3, self.V)
-        tmp = torch.einsum("ai,ajm->ijm", self.V, tmp)
+        tmp = torch.einsum("abm,bj->ajm", V3, V)
+        tmp = torch.einsum("ai,ajm->ijm", V, tmp)
         # Scale by 1/eigenvalue
-        tmp = tmp / self.kron_eigs.unsqueeze(-1)
+        tmp = tmp / kron_eigs.unsqueeze(-1)
         # (V⊗V) tmp  ≡  V @ tmp @ V.T
-        tmp = torch.einsum("ijm,bj->ibm", tmp, self.V)
-        tmp = torch.einsum("ai,ibm->abm", self.V, tmp)
+        tmp = torch.einsum("ijm,bj->ibm", tmp, V)
+        tmp = torch.einsum("ai,ibm->abm", V, tmp)
 
         result = tmp.reshape(self.N, m)
         return result.squeeze(-1) if squeeze else result
@@ -341,15 +367,17 @@ class KroneckerPlusSpatialCovariance(nn.Module):
             U:      [N, k] low-rank uncertainty factor (typically k=1)
             target: [N]    ground truth
         """
+        V, kron_eigs = self._compute_eigens()
+
         e = target - mu
         k = U.shape[-1]
 
-        log_det_A = self.kron_eigs.log().sum()
-        AU        = self._A_solve(U)                                     # [N, k]
+        log_det_A = kron_eigs.log().sum()
+        AU        = self._A_solve(U, V, kron_eigs)                       # [N, k]
         M_mat     = torch.eye(k, device=U.device) + U.T @ AU            # [k, k]
         log_det_K = log_det_A + torch.linalg.slogdet(M_mat)[1]
 
-        Ae      = self._A_solve(e)
+        Ae      = self._A_solve(e, V, kron_eigs)
         K_inv_e = Ae - AU @ torch.linalg.solve(M_mat, U.T @ Ae)
         mahal   = e @ K_inv_e
 
@@ -372,14 +400,16 @@ class KroneckerPlusSpatialCovariance(nn.Module):
             U_all:   [N, C] per-pixel std dev per channel (low-rank factor, k=1)
             targets: [N, C] ground truth
         """
+        V, kron_eigs = self._compute_eigens()
+
         N, C = targets.shape
         E = targets - mu_all                                     # [N, C]
 
-        log_det_A = self.kron_eigs.log().sum()
+        log_det_A = kron_eigs.log().sum()
 
         # Single batched solve for all channels
-        AE = self._A_solve(E)                                    # [N, C]
-        AU = self._A_solve(U_all)                                # [N, C]
+        AE = self._A_solve(E, V, kron_eigs)                      # [N, C]
+        AU = self._A_solve(U_all, V, kron_eigs)                  # [N, C]
 
         # Per-channel scalar: M_c = 1 + u_cᵀ A⁻¹ u_c
         M_vals          = 1.0 + (U_all * AU).sum(dim=0)         # [C]
