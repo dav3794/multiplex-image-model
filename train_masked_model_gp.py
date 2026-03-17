@@ -242,6 +242,7 @@ def train_masked_gp(
             "optimizer_state_dict": optimizer.state_dict(),
             "scheduler_state_dict": scheduler.state_dict(),
             "epoch": epoch,
+            "total_steps": total_steps,
         }
         if gp_covariance_module is not None:
              checkpoint["gp_covariance_state_dict"] = gp_covariance_module.state_dict()
@@ -553,9 +554,23 @@ if __name__ == "__main__":
                 device=device,
             )
 
+    # Load checkpoint early to recover total_steps for scheduler reconstruction
+    start_epoch = 0
+    checkpoint = None
+    if config.resolve_checkpoint():
+        print(f"Loading model from checkpoint: {config.from_checkpoint}")
+        checkpoint = torch.load(config.from_checkpoint, map_location=device)
+        model.load_state_dict(checkpoint["model_state_dict"])
+        if gp_covariance_module is not None and "gp_covariance_state_dict" in checkpoint:
+            gp_covariance_module.load_state_dict(checkpoint["gp_covariance_state_dict"])
+        start_epoch = checkpoint["epoch"] + 1
+
     # Optimizer and scheduler
+    # When resuming, use saved total_steps so scheduler boundaries match original run
     total_steps = (
-        len(train_dataloader) * config.epochs // config.gradient_accumulation_steps
+        checkpoint["total_steps"]
+        if checkpoint is not None and "total_steps" in checkpoint
+        else len(train_dataloader) * config.epochs // config.gradient_accumulation_steps
     )
     num_warmup_steps = int(total_steps * config.frac_warmup_steps)
     num_annealing_steps = total_steps - num_warmup_steps
@@ -579,6 +594,10 @@ if __name__ == "__main__":
         type="cosine",
     )
 
+    if checkpoint is not None:
+        optimizer.load_state_dict(checkpoint["optimizer_state_dict"])
+        scheduler.load_state_dict(checkpoint["scheduler_state_dict"])
+
     # Initialize experiment tracking
     comet_config = config.model_dump()
     comet_config.update({
@@ -592,18 +611,6 @@ if __name__ == "__main__":
         "gp_learn_lengthscale": gp_learn_lengthscale,
     })
     init_experiment(comet_config)
-
-    # Load checkpoint if specified
-    start_epoch = 0
-    if config.resolve_checkpoint():
-        print(f"Loading model from checkpoint: {config.from_checkpoint}")
-        checkpoint = torch.load(config.from_checkpoint, map_location=device)
-        model.load_state_dict(checkpoint["model_state_dict"])
-        optimizer.load_state_dict(checkpoint["optimizer_state_dict"])
-        scheduler.load_state_dict(checkpoint["scheduler_state_dict"])
-        if gp_covariance_module is not None and "gp_covariance_state_dict" in checkpoint:
-             gp_covariance_module.load_state_dict(checkpoint["gp_covariance_state_dict"])
-        start_epoch = checkpoint["epoch"] + 1
 
     # Train the model
     train_masked_gp(

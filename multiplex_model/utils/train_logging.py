@@ -301,7 +301,9 @@ def init_experiment(config: dict[str, Any]) -> None:
 
     print(f"Run name: {run_name}")
     _experiment.set_name(run_name)
-    _experiment.add_tags(config.get("tags", []))
+    tags = config.get("tags", [])
+    if tags:
+        _experiment.add_tags(tags)
     _experiment.log_parameters(config)
 
 
@@ -354,6 +356,8 @@ def log_validation_metrics(
     latent_rankme: float,
     epoch: int,
     variance_mae_correlation: float | None = None,
+    val_standard_nll: float | None = None,
+    val_gp_nll: float | None = None,
 ) -> None:
     """Log validation metrics to Comet.ml.
 
@@ -376,6 +380,10 @@ def log_validation_metrics(
     }
     if variance_mae_correlation is not None:
         metrics["val/variance_mae_correlation"] = variance_mae_correlation
+    if val_standard_nll is not None:
+        metrics["val/standard_nll"] = val_standard_nll
+    if val_gp_nll is not None:
+        metrics["val/gp_nll"] = val_gp_nll
     _experiment.log_metrics(metrics, epoch=epoch)
 
 
