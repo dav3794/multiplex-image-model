@@ -52,6 +52,7 @@ from multiplex_model.utils import (
     log_validation_images,
     log_validation_metrics,
     plot_reconstructs_with_masks,
+    plot_reconstructs_with_uncertainty,
 )
 
 
@@ -368,6 +369,26 @@ def test_masked_gp(
                     masked_channels_names=masked_channels_names,
                     img_idx=idx,
                 )
+
+                sigma = torch.exp(0.5 * logvar)
+                uncertainty_img = plot_reconstructs_with_uncertainty(
+                    img,
+                    mi,
+                    sigma,
+                    channel_ids,
+                    unactive_channels,
+                    markers_names_map=marker_names_map,
+                    ncols=9,
+                )
+                log_validation_images(
+                    fig=uncertainty_img,
+                    panel_idx=panel_idx[0],
+                    img_path=img_path[0],
+                    epoch=epoch,
+                    masked_channels_names=masked_channels_names,
+                    img_idx=idx,
+                    name_suffix="_sigma",
+                )
                 plt.close("all")
 
     val_loss = running_loss / len(test_dataloader)
@@ -565,12 +586,12 @@ if __name__ == "__main__":
         start_epoch = checkpoint["epoch"] + 1
 
     # Optimizer and scheduler
-    # When resuming, use saved total_steps so scheduler boundaries match original run
-    total_steps = (
-        checkpoint["total_steps"]
-        if checkpoint is not None and "total_steps" in checkpoint
-        else len(train_dataloader) * config.epochs // config.gradient_accumulation_steps
-    )
+    # When resuming normally, use saved total_steps so scheduler boundaries match original run.
+    # When reset_lr_schedule=True, recalculate from config.epochs for a fresh cosine cycle.
+    if checkpoint is not None and "total_steps" in checkpoint and not config.reset_lr_schedule:
+        total_steps = checkpoint["total_steps"]
+    else:
+        total_steps = len(train_dataloader) * config.epochs // config.gradient_accumulation_steps
     num_warmup_steps = int(total_steps * config.frac_warmup_steps)
     num_annealing_steps = total_steps - num_warmup_steps
 
@@ -593,7 +614,7 @@ if __name__ == "__main__":
         type="cosine",
     )
 
-    if checkpoint is not None:
+    if checkpoint is not None and not config.reset_lr_schedule:
         optimizer.load_state_dict(checkpoint["optimizer_state_dict"])
         scheduler.load_state_dict(checkpoint["scheduler_state_dict"])
 

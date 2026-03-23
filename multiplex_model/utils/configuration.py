@@ -256,6 +256,10 @@ class TrainingConfig(BaseModel):
         None,
         description="Path to checkpoint to resume from. Use 'last' to load last checkpoint if available",
     )
+    reset_lr_schedule: bool = Field(
+        False,
+        description="When resuming, ignore checkpoint's scheduler/optimizer state and start a fresh LR schedule",
+    )
     checkpoints_dir: str = Field(
         "checkpoints", description="Directory to save checkpoints"
     )
