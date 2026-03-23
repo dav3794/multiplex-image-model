@@ -587,11 +587,13 @@ if __name__ == "__main__":
 
     # Optimizer and scheduler
     # When resuming normally, use saved total_steps so scheduler boundaries match original run.
-    # When reset_lr_schedule=True, recalculate from config.epochs for a fresh cosine cycle.
+    # When reset_lr_schedule=True, recalculate from remaining epochs for a fresh cosine cycle
+    # that covers exactly the new training run (config.epochs - start_epoch epochs).
     if checkpoint is not None and "total_steps" in checkpoint and not config.reset_lr_schedule:
         total_steps = checkpoint["total_steps"]
     else:
-        total_steps = len(train_dataloader) * config.epochs // config.gradient_accumulation_steps
+        remaining_epochs = config.epochs - start_epoch
+        total_steps = len(train_dataloader) * remaining_epochs // config.gradient_accumulation_steps
     num_warmup_steps = int(total_steps * config.frac_warmup_steps)
     num_annealing_steps = total_steps - num_warmup_steps
 
