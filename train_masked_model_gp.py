@@ -69,6 +69,7 @@ def train_masked_gp(
     marker_names_map,
     gp_covariance_module=None,
     use_gp_loss=True,
+    use_marker_covariance=False,
     lambda_gp=0.1,
     gp_max_cg_iterations=50,
     gp_downscale_factor=1,
@@ -121,7 +122,15 @@ def train_masked_gp(
     # Initialize GP loss if enabled
     gp_loss_fn = None
     if use_gp_loss and gp_covariance_module is not None:
-        if isinstance(gp_covariance_module, KroneckerPlusSpatialCovariance):
+        if isinstance(gp_covariance_module, KroneckerMarkerCovariance):
+            gp_loss_fn = HybridKroneckerMarkerGPNLLLoss(
+                covariance_module=gp_covariance_module,
+                lambda_gp=lambda_gp,
+                downscale_factor=gp_downscale_factor,
+                device=device,
+            )
+            print(f"Using Kronecker Marker GP loss with lambda_gp={lambda_gp}")
+        elif isinstance(gp_covariance_module, KroneckerPlusSpatialCovariance):
             gp_loss_fn = HybridKroneckerGPNLLLoss(
                 covariance_module=gp_covariance_module,
                 lambda_gp=lambda_gp,
@@ -175,8 +184,11 @@ def train_masked_gp(
             logvar = ClampWithGrad.apply(logvar, -15.0, 15.0)
 
             if use_gp_loss and gp_loss_fn is not None:
-                # Use hybrid GP loss
-                loss, loss_dict = gp_loss_fn(img, mi, logvar)
+                if use_marker_covariance:
+                    marker_emb = model.encoder.hyperkernel.hyperkernel_weights(channel_ids)
+                    loss, loss_dict = gp_loss_fn(img, mi, logvar, marker_emb)
+                else:
+                    loss, loss_dict = gp_loss_fn(img, mi, logvar)
                 
                 # Track loss components
                 for key in loss_dict:
@@ -697,6 +709,7 @@ if __name__ == "__main__":
         marker_names_map=INV_TOKENIZER,
         gp_covariance_module=gp_covariance_module,
         use_gp_loss=use_gp_loss,
+        use_marker_covariance=use_marker_covariance,
         lambda_gp=lambda_gp,
         gp_max_cg_iterations=gp_max_cg_iterations,
         gp_downscale_factor=gp_downscale_factor,
