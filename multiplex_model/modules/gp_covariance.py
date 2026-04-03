@@ -500,3 +500,102 @@ class KroneckerMarkerCovariance(nn.Module):
 
         result = tmp.reshape(n * n * C, m)
         return result.squeeze(-1) if squeeze else result
+
+    def _compute_marker_eigen(
+        self, marker_embeddings: torch.Tensor
+    ) -> tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
+        """
+        Project embeddings, build K_C, eigendecompose, compute triple eigenvalues.
+
+        Args:
+            marker_embeddings: [C, hyperkernel_model_dim]
+
+        Returns:
+            (V_C, triple_eigs, K_C):
+                V_C: [C, C] eigenvectors
+                triple_eigs: [n, n, C] eigenvalues of A
+                K_C: [C, C] marker covariance
+        """
+        E = self.embedding_projection(marker_embeddings)  # [C, D]
+        C = E.shape[0]
+        K_C = E @ E.T + self.marker_jitter * torch.eye(C, device=E.device, dtype=E.dtype)
+        lam_C, V_C = torch.linalg.eigh(K_C)
+
+        # triple_eigs[i, j, k] = kron_eigs[i,j] * lam_C[k] + kernel_jitter
+        triple_eigs = self.kron_eigs.unsqueeze(-1) * lam_C.unsqueeze(0).unsqueeze(0) + self.kernel_jitter
+
+        return V_C, triple_eigs, K_C
+
+    def log_prob_joint(
+        self,
+        mu_all: torch.Tensor,
+        U_all: torch.Tensor,
+        targets: torch.Tensor,
+        marker_embeddings: torch.Tensor,
+    ) -> torch.Tensor:
+        """
+        Joint log p(targets | mu, K) over all N pixels and C markers.
+
+        K = (K_x ⊗ K_y) ⊗ K_C + U_block·U_blockᵀ + jitter·I
+
+        Uses Woodbury identity with rank-C U_block.
+
+        Args:
+            mu_all:  [N, C] predicted means
+            U_all:   [N, C] per-pixel std dev per channel
+            targets: [N, C] ground truth
+            marker_embeddings: [C, hyperkernel_model_dim] raw Hyperkernel embeddings
+
+        Returns:
+            Scalar log probability.
+        """
+        N, C = targets.shape
+        NC = N * C
+
+        V_C, triple_eigs, _ = self._compute_marker_eigen(marker_embeddings)
+
+        # Error vector in spatial-major order: [pix0_ch0, pix0_ch1, ..., pixN_chC]
+        e = (targets - mu_all).reshape(-1)  # [NC]
+
+        # Build U_block [NC, C] in spatial-major order: row (i*C + c) = pixel i, marker c
+        U_block = torch.diag_embed(U_all).reshape(NC, C)
+
+        # log det(A)
+        log_det_A = triple_eigs.log().sum()
+
+        # A⁻¹ applied to error and U_block columns (C+1 RHS, batched)
+        rhs = torch.cat([e.unsqueeze(-1), U_block], dim=-1)  # [NC, C+1]
+        A_inv_rhs = self._A_solve_triple(rhs, V_C, triple_eigs)  # [NC, C+1]
+        A_inv_e = A_inv_rhs[:, 0]       # [NC]
+        A_inv_U = A_inv_rhs[:, 1:]      # [NC, C]
+
+        # Woodbury inner matrix: M = I_C + U_blockᵀ A⁻¹ U_block  [C, C]
+        M = torch.eye(C, device=e.device, dtype=e.dtype) + U_block.T @ A_inv_U
+
+        # log det(K) = log det(A) + log det(M)
+        log_det_K = log_det_A + torch.linalg.slogdet(M)[1]
+
+        # K⁻¹ e = A⁻¹e - A⁻¹U M⁻¹ Uᵀ A⁻¹e
+        Ut_Ainv_e = U_block.T @ A_inv_e  # [C]
+        correction = A_inv_U @ torch.linalg.solve(M, Ut_Ainv_e)  # [NC]
+        K_inv_e = A_inv_e - correction
+
+        mahal = e @ K_inv_e
+
+        return -0.5 * (mahal + log_det_K + NC * math.log(2 * math.pi))
+
+    def compute_marker_correlation(self, marker_embeddings: torch.Tensor) -> torch.Tensor:
+        """
+        Compute C×C correlation matrix from projected marker embeddings.
+
+        Args:
+            marker_embeddings: [C, hyperkernel_model_dim]
+
+        Returns:
+            [C, C] correlation matrix (ones on diagonal).
+        """
+        E = self.embedding_projection(marker_embeddings)
+        K_C = E @ E.T + self.marker_jitter * torch.eye(E.shape[0], device=E.device, dtype=E.dtype)
+        # Normalize to correlation: corr[i,j] = K_C[i,j] / sqrt(K_C[i,i] * K_C[j,j])
+        diag_sqrt = torch.sqrt(torch.diag(K_C))
+        return K_C / (diag_sqrt.unsqueeze(0) * diag_sqrt.unsqueeze(1))
