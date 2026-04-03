@@ -250,6 +250,7 @@ def train_masked_gp(
             mask_patch_size=mask_patch_size,
             marker_names_map=marker_names_map,
             use_gp_loss=use_gp_loss,
+            use_marker_covariance=use_marker_covariance,
         )
 
         # Save checkpoint
@@ -291,6 +292,7 @@ def test_masked_gp(
     fully_masked_channels_max_frac=0.5,
     mask_patch_size=8,
     use_gp_loss=True,
+    use_marker_covariance=False,
 ):
     """
     Validation loop with optional GP loss evaluation.
@@ -359,9 +361,22 @@ def test_masked_gp(
 
             # Compute loss
             if use_gp_loss and gp_loss_fn is not None:
-                loss, loss_dict = gp_loss_fn(img, mi, logvar)
+                if use_marker_covariance:
+                    marker_emb = model.encoder.hyperkernel.hyperkernel_weights(channel_ids)
+                    loss, loss_dict = gp_loss_fn(img, mi, logvar, marker_emb)
+                else:
+                    loss, loss_dict = gp_loss_fn(img, mi, logvar)
                 running_standard_nll += loss_dict["standard_nll"]
                 running_gp_nll += loss_dict["gp_nll"]
+                if use_marker_covariance:
+                    _, _, K_C = gp_covariance_module._compute_marker_eigen(marker_emb[0])
+                    eigvals = torch.linalg.eigvalsh(K_C)
+                    if idx == 0:
+                        log_validation_batch_metrics(
+                            marker_cov_min_eigenvalue=eigvals.min().item(),
+                            marker_cov_condition_number=(eigvals.max() / eigvals.min()).item(),
+                            step=epoch,
+                        )
             else:
                 loss = nll_loss(img, mi, logvar)
             
@@ -695,6 +710,9 @@ if __name__ == "__main__":
         "gp_max_cg_iterations": gp_max_cg_iterations,
         "gp_downscale_factor":  gp_downscale_factor,
         "gp_learn_lengthscale": gp_learn_lengthscale,
+        "use_marker_covariance": use_marker_covariance,
+        "marker_embed_dim":      marker_embed_dim,
+        "marker_jitter":         marker_jitter,
     })
     init_experiment(comet_config)
 
