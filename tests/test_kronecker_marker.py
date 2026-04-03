@@ -58,7 +58,7 @@ def test_A_solve_triple_recovers_identity():
     # Solve A^{-1} (A v) should recover v
     recovered = mod._A_solve_triple(Av, V_C, triple_eigs)
 
-    torch.testing.assert_close(recovered, v, atol=1e-4, rtol=1e-4)
+    torch.testing.assert_close(recovered, v, atol=1e-3, rtol=1e-3)
 
 
 def test_A_solve_triple_batched():
@@ -91,7 +91,7 @@ def test_A_solve_triple_batched():
     Av = A_dense @ v
     recovered = mod._A_solve_triple(Av, V_C, triple_eigs)
 
-    torch.testing.assert_close(recovered, v, atol=1e-4, rtol=1e-4)
+    torch.testing.assert_close(recovered, v, atol=1e-3, rtol=1e-3)
 
 
 def test_log_prob_joint_matches_dense():

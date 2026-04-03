@@ -464,7 +464,7 @@ class KroneckerMarkerGPNLLLoss(nn.Module):
         mu_bnc = mu.reshape(B, C, N).permute(0, 2, 1)
         sigma_bnc = sigma.reshape(B, C, N).permute(0, 2, 1)
 
-        total_log_prob = torch.zeros(1, device=self.device, dtype=torch.float32)
+        total_log_prob = torch.zeros((), device=self.device, dtype=torch.float32)
         for b in range(B):
             total_log_prob = total_log_prob + self.covariance_module.log_prob_joint(
                 mu_bnc[b],
