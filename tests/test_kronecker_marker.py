@@ -214,3 +214,83 @@ def test_hybrid_marker_loss_lambda_zero_equals_standard():
     expected_nll = torch.mean((target - mu) ** 2 / (var + 1e-8) + logvar)
 
     torch.testing.assert_close(total_loss, expected_nll, atol=1e-5, rtol=1e-5)
+
+
+def test_end_to_end_training_step():
+    """Simulate one training step: model forward -> extract embeddings -> loss -> backward."""
+    torch.manual_seed(42)
+    B, C_total, H, W = 2, 5, 16, 16
+    C_active = 4
+
+    from multiplex_model.modules import MultiplexAutoencoder
+    from multiplex_model.losses import HybridKroneckerMarkerGPNLLLoss
+    from multiplex_model.modules.gp_covariance import KroneckerMarkerCovariance
+
+    model = MultiplexAutoencoder(
+        num_channels=C_total,
+        encoder_config={
+            "ma_layers_blocks": [1],
+            "ma_embedding_dims": [8],
+            "pm_layers_blocks": [1],
+            "pm_embedding_dims": [16],
+            "hyperkernel_config": {"kernel_size": 1, "padding": 0, "stride": 1, "use_bias": True},
+        },
+        decoder_config={
+            "decoded_embed_dim": 16,
+            "num_blocks": 1,
+            "hyperkernel_config": {"kernel_size": 1, "padding": 0, "stride": 1, "use_bias": True},
+        },
+    )
+
+    # hyperkernel_model_dim = pm_embedding_dims[0] * kernel_size^2 * ma_embedding_dims[-1]
+    # = 16 * 1 * 8 = 128
+    hyperkernel_model_dim = 16 * 1 * 8
+
+    gp_module = KroneckerMarkerCovariance(
+        grid_size=H,
+        marker_embed_dim=8,
+        hyperkernel_model_dim=hyperkernel_model_dim,
+        kernel_jitter=1e-2,
+        marker_jitter=1e-2,
+        device="cpu",
+    )
+
+    loss_fn = HybridKroneckerMarkerGPNLLLoss(
+        covariance_module=gp_module,
+        lambda_gp=0.1,
+        downscale_factor=1,
+        device="cpu",
+    )
+
+    optimizer = torch.optim.AdamW(
+        list(model.parameters()) + list(gp_module.parameters()),
+        lr=1e-3,
+    )
+
+    # Simulate forward pass
+    img = torch.rand(B, C_active, H, W)
+    channel_ids = torch.arange(C_active).unsqueeze(0).expand(B, -1)
+    active_ids = channel_ids.clone()
+
+    output = model(img, active_ids, channel_ids)["output"]
+    mi, logvar = output.unbind(dim=-1)
+    mi = torch.sigmoid(mi)
+    logvar = torch.clamp(logvar, -15.0, 15.0)
+
+    # Extract marker embeddings
+    marker_emb = model.encoder.hyperkernel.hyperkernel_weights(channel_ids)
+
+    # Compute loss
+    loss, loss_dict = loss_fn(img, mi, logvar, marker_emb)
+
+    # Backward
+    optimizer.zero_grad()
+    loss.backward()
+    optimizer.step()
+
+    # Verify gradients exist
+    assert model.encoder.hyperkernel.hyperkernel_weights.weight.grad is not None
+    assert gp_module.embedding_projection.weight.grad is not None
+    assert loss.isfinite(), f"Loss is not finite: {loss.item()}"
+
+    print(f"End-to-end smoke test passed. Loss: {loss.item():.4f}")
