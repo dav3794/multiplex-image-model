@@ -30,11 +30,13 @@ from multiplex_model.data import DatasetFromTIFF, PanelBatchSampler, TestCrop
 from multiplex_model.losses import (
     HybridGPNLLLoss,
     HybridKroneckerGPNLLLoss,
+    HybridKroneckerMarkerGPNLLLoss,
     RankMe,
     beta_nll_loss,
     nll_loss,
 )
 from multiplex_model.modules.gp_covariance import (
+    KroneckerMarkerCovariance,
     KroneckerPlusSpatialCovariance,
     LowRankTimesSpatialCovariance,
 )
@@ -547,6 +549,9 @@ if __name__ == "__main__":
     gp_max_cg_iterations = getattr(config, "gp_max_cg_iterations", 50)
     gp_downscale_factor  = getattr(config, "gp_downscale_factor", 1)
     gp_learn_lengthscale = getattr(config, "gp_learn_lengthscale", False)
+    use_marker_covariance = getattr(config, "use_marker_covariance", False)
+    marker_embed_dim      = getattr(config, "marker_embed_dim", 32)
+    marker_jitter         = getattr(config, "marker_jitter", 1e-2)
 
     print("\nGP Loss Configuration:")
     print(f"  Use GP Loss:         {use_gp_loss}")
@@ -556,7 +561,10 @@ if __name__ == "__main__":
     print(f"  Lengthscale:         {gp_lengthscale}")
     print(f"  Max CG Iterations:   {gp_max_cg_iterations}  (ignored for Kronecker)")
     print(f"  Downscale Factor:    {gp_downscale_factor}")
-    print(f"  Learn Lengthscale:   {gp_learn_lengthscale}  (ignored for Kronecker)\n")
+    print(f"  Learn Lengthscale:   {gp_learn_lengthscale}  (ignored for Kronecker)")
+    print(f"  Use Marker Cov:      {use_marker_covariance}")
+    print(f"  Marker Embed Dim:    {marker_embed_dim}")
+    print(f"  Marker Jitter:       {marker_jitter}\n")
 
     # Initialize GP covariance module
     gp_covariance_module = None
@@ -565,11 +573,34 @@ if __name__ == "__main__":
         H_gp = H // gp_downscale_factor
         W_gp = W // gp_downscale_factor
 
-        if use_kronecker_gp:
-            # Kronecker requires square images after downscaling
+        if use_kronecker_gp and use_marker_covariance:
             assert H_gp == W_gp, (
                 f"Kronecker GP requires square spatial grid, "
-                f"got {H_gp}×{W_gp}. Adjust input_image_size or gp_downscale_factor."
+                f"got {H_gp}x{W_gp}. Adjust input_image_size or gp_downscale_factor."
+            )
+            # Compute hyperkernel_model_dim from encoder config
+            hk_cfg = config.encoder_config
+            if len(hk_cfg.ma_layers_blocks) == 0:
+                hk_input_dim = 1
+            else:
+                hk_input_dim = hk_cfg.ma_embedding_dims[-1]
+            hk_embed_dim = hk_cfg.pm_embedding_dims[0]
+            hk_kernel_size = hk_cfg.hyperkernel_config.kernel_size
+            hyperkernel_model_dim = hk_embed_dim * (hk_kernel_size ** 2) * hk_input_dim
+
+            gp_covariance_module = KroneckerMarkerCovariance(
+                grid_size=H_gp,
+                marker_embed_dim=marker_embed_dim,
+                hyperkernel_model_dim=hyperkernel_model_dim,
+                kernel_jitter=gp_kernel_jitter,
+                marker_jitter=marker_jitter,
+                spatial_matern_kernel_length_scale=gp_lengthscale,
+                device=device,
+            )
+        elif use_kronecker_gp:
+            assert H_gp == W_gp, (
+                f"Kronecker GP requires square spatial grid, "
+                f"got {H_gp}x{W_gp}. Adjust input_image_size or gp_downscale_factor."
             )
             gp_covariance_module = KroneckerPlusSpatialCovariance(
                 grid_size=H_gp,
@@ -617,8 +648,11 @@ if __name__ == "__main__":
 
     # Include GP covariance parameters in optimization if learnable
     params_to_optimize = list(model.parameters())
-    if use_gp_loss and gp_learn_lengthscale and gp_covariance_module is not None:
-        params_to_optimize += list(gp_covariance_module.parameters())
+    if use_gp_loss and gp_covariance_module is not None:
+        if use_marker_covariance:
+            params_to_optimize += list(gp_covariance_module.parameters())
+        elif gp_learn_lengthscale:
+            params_to_optimize += list(gp_covariance_module.parameters())
 
     optimizer = optim.AdamW(
         params_to_optimize,
