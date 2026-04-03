@@ -242,6 +242,15 @@ class TrainingConfig(BaseModel):
     use_kronecker_gp: bool = Field(
         False, description="Whether to use Kronecker GP loss instead of CG-based GP loss"
     )
+    use_marker_covariance: bool = Field(
+        False, description="Whether to use marker covariance in Kronecker GP loss (requires use_kronecker_gp=True)"
+    )
+    marker_embed_dim: int = Field(
+        32, gt=0, description="Projection dimension for marker embeddings in K_C computation"
+    )
+    marker_jitter: float = Field(
+        1e-2, ge=0, description="Jitter added to marker covariance K_C for numerical stability"
+    )
 
     # Model architecture
     encoder_config: EncoderConfig = Field(
