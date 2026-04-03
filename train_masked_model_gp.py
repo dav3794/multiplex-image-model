@@ -624,6 +624,7 @@ if __name__ == "__main__":
                 spatial_matern_kernel_length_scale=gp_lengthscale,
                 device=device,
             )
+            gp_covariance_module = gp_covariance_module.to(device)
         elif use_kronecker_gp:
             assert H_gp == W_gp, (
                 f"Kronecker GP requires square spatial grid, "
