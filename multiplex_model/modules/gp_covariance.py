@@ -391,3 +391,112 @@ class KroneckerPlusSpatialCovariance(nn.Module):
         mahal      = (E * K_inv_E).sum()                         # scalar
 
         return -0.5 * (mahal + log_det_K_total + N * C * math.log(2 * math.pi))
+
+
+class KroneckerMarkerCovariance(nn.Module):
+    """
+    GP covariance with triple Kronecker structure + marker covariance + Woodbury.
+
+    Models K = (K_x ⊗ K_y) ⊗ K_C + U_block·U_blockᵀ + jitter·I
+
+    K_C is computed from Hyperkernel marker embeddings projected to a lower
+    dimension: K_C = E·Eᵀ + marker_jitter·I. Eigendecomposed every forward
+    pass (O(C³), cheap for C ≤ 40).
+
+    Spatial K_x, K_y are 1D Matérn kernels eigendecomposed once at init
+    (same as KroneckerPlusSpatialCovariance).
+
+    The full NC×NC covariance is never materialised. A⁻¹v is computed via
+    three einsum contractions (spatial x, spatial y, marker).
+    """
+
+    def __init__(
+        self,
+        grid_size: int,
+        marker_embed_dim: int,
+        hyperkernel_model_dim: int,
+        kernel_jitter: float = 1e-2,
+        marker_jitter: float = 1e-2,
+        spatial_matern_kernel_nu: float = 1.5,
+        spatial_matern_kernel_length_scale: float = 5.0,
+        device=None,
+    ):
+        super().__init__()
+        if device is None:
+            device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+
+        self.kernel_jitter = kernel_jitter
+        self.marker_jitter = marker_jitter
+        self.grid_size = grid_size
+        self.N = grid_size * grid_size
+
+        # --- Spatial eigendecomposition (identical to KroneckerPlusSpatialCovariance) ---
+        x1d = torch.linspace(0, 1, grid_size, device=device).unsqueeze(-1)
+
+        k1d = gpytorch.kernels.MaternKernel(nu=spatial_matern_kernel_nu).to(device)
+        k1d.lengthscale = spatial_matern_kernel_length_scale
+        k1d.raw_lengthscale.requires_grad = False
+
+        with torch.no_grad():
+            K1d = k1d(x1d).evaluate()
+            lam, V = torch.linalg.eigh(K1d)
+
+        self.register_buffer("lam", lam)
+        self.register_buffer("V", V)
+
+        # Spatial-only Kronecker eigenvalues (without jitter — jitter added in triple_eigs)
+        kron_eigs = torch.outer(lam, lam)  # [n, n]
+        self.register_buffer("kron_eigs", kron_eigs)
+
+        # --- Marker embedding projection ---
+        self.embedding_projection = nn.Linear(hyperkernel_model_dim, marker_embed_dim)
+
+    def _A_solve_triple(
+        self,
+        v: torch.Tensor,
+        V_C: torch.Tensor,
+        triple_eigs: torch.Tensor,
+    ) -> torch.Tensor:
+        """
+        Solve A⁻¹v where A = (K_x ⊗ K_y) ⊗ K_C + jitter·I, analytically.
+
+        A = (V_x ⊗ V_y ⊗ V_C) diag(triple_eigs) (V_x ⊗ V_y ⊗ V_C)ᵀ
+
+        Applied via six einsum contractions (3 forward + divide + 3 reverse).
+
+        Args:
+            v: [NC] or [NC, m]
+            V_C: [C, C] eigenvectors of K_C
+            triple_eigs: [n, n, C] = kron_eigs[i,j] * lam_C[k] + jitter
+
+        Returns:
+            A⁻¹v, same shape as v.
+        """
+        n = self.grid_size
+        C = V_C.shape[0]
+        squeeze = v.dim() == 1
+        if squeeze:
+            v = v.unsqueeze(-1)
+        m = v.shape[-1]
+
+        # Reshape [NC, m] -> [n, n, C, m] (spatial_x, spatial_y, marker, rhs)
+        V3 = v.reshape(n, n, C, m)
+
+        # Forward transform: (V_x ⊗ V_y ⊗ V_C)ᵀ v
+        # Contract marker axis with V_C
+        tmp = torch.einsum("ijcm, ck -> ijkm", V3, V_C)
+        # Contract spatial_y axis with V
+        tmp = torch.einsum("ijkm, jb -> ibkm", tmp, self.V)
+        # Contract spatial_x axis with V
+        tmp = torch.einsum("ibkm, ia -> abkm", tmp, self.V)
+
+        # Divide by eigenvalues
+        tmp = tmp / triple_eigs.unsqueeze(-1)
+
+        # Reverse transform: (V_x ⊗ V_y ⊗ V_C) tmp
+        tmp = torch.einsum("abkm, jb -> ajkm", tmp, self.V)
+        tmp = torch.einsum("ajkm, ia -> ijkm", tmp, self.V)
+        tmp = torch.einsum("ijkm, ck -> ijcm", tmp, V_C)
+
+        result = tmp.reshape(n * n * C, m)
+        return result.squeeze(-1) if squeeze else result
