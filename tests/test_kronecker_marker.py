@@ -146,3 +146,71 @@ def test_compute_marker_correlation_shape_and_diagonal():
     corr = mod.compute_marker_correlation(marker_emb)
     assert corr.shape == (5, 5)
     torch.testing.assert_close(torch.diag(corr), torch.ones(5), atol=1e-5, rtol=1e-5)
+
+
+def test_hybrid_marker_loss_forward_shape_and_components():
+    """HybridKroneckerMarkerGPNLLLoss returns scalar loss and dict with expected keys."""
+    from multiplex_model.losses import HybridKroneckerMarkerGPNLLLoss
+
+    torch.manual_seed(42)
+    n = 4
+    B, C = 2, 3
+    H = W = n
+
+    mod = _build_module(grid_size=n, marker_embed_dim=3, hyperkernel_model_dim=8)
+    loss_fn = HybridKroneckerMarkerGPNLLLoss(
+        covariance_module=mod,
+        lambda_gp=0.1,
+        downscale_factor=1,
+        device="cpu",
+    )
+
+    target = torch.rand(B, C, H, W)
+    mu = torch.rand(B, C, H, W)
+    logvar = torch.randn(B, C, H, W) * 0.1
+    marker_embeddings = torch.randn(B, C, 8)  # [B, C, model_dim]
+
+    total_loss, loss_dict = loss_fn(target, mu, logvar, marker_embeddings)
+
+    assert total_loss.dim() == 0, "Loss should be scalar"
+    assert total_loss.requires_grad, "Loss must be differentiable"
+    assert "standard_nll" in loss_dict
+    assert "gp_nll" in loss_dict
+    assert "total_loss" in loss_dict
+
+    # Verify gradient flows through marker_embeddings
+    marker_embeddings_grad = torch.randn(B, C, 8, requires_grad=True)
+    total_loss2, _ = loss_fn(target, mu, logvar, marker_embeddings_grad)
+    total_loss2.backward()
+    assert marker_embeddings_grad.grad is not None, "Gradients must flow to marker embeddings"
+
+
+def test_hybrid_marker_loss_lambda_zero_equals_standard():
+    """With lambda_gp=0, HybridKroneckerMarkerGPNLLLoss should equal standard NLL."""
+    from multiplex_model.losses import HybridKroneckerMarkerGPNLLLoss
+
+    torch.manual_seed(42)
+    n = 4
+    B, C = 1, 3
+    H = W = n
+
+    mod = _build_module(grid_size=n, marker_embed_dim=3, hyperkernel_model_dim=8)
+    loss_fn = HybridKroneckerMarkerGPNLLLoss(
+        covariance_module=mod,
+        lambda_gp=0.0,
+        downscale_factor=1,
+        device="cpu",
+    )
+
+    target = torch.rand(B, C, H, W)
+    mu = torch.rand(B, C, H, W)
+    logvar = torch.randn(B, C, H, W) * 0.1
+    marker_embeddings = torch.randn(B, C, 8)
+
+    total_loss, loss_dict = loss_fn(target, mu, logvar, marker_embeddings)
+
+    # Standard NLL computed directly
+    var = torch.exp(logvar)
+    expected_nll = torch.mean((target - mu) ** 2 / (var + 1e-8) + logvar)
+
+    torch.testing.assert_close(total_loss, expected_nll, atol=1e-5, rtol=1e-5)

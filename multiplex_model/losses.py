@@ -389,3 +389,147 @@ class HybridKroneckerGPNLLLoss(nn.Module):
             "total_loss":    total_loss.item(),
         }
         return total_loss, loss_dict
+
+
+class KroneckerMarkerGPNLLLoss(nn.Module):
+    """
+    GP-based NLL loss with joint spatial + marker covariance.
+
+    Uses KroneckerMarkerCovariance for triple Kronecker (K_x ⊗ K_y) ⊗ K_C
+    plus Woodbury for per-pixel sigma. Processes one image at a time,
+    computing joint log-prob over all N*C dimensions.
+
+    Requires square images (H == W == grid_size after downscaling).
+    """
+
+    def __init__(
+        self,
+        covariance_module,
+        downscale_factor: int = 1,
+        device=None,
+    ):
+        super().__init__()
+        if device is None:
+            device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+
+        self.device = device
+        self.covariance_module = covariance_module
+        self.downscale_factor = downscale_factor
+
+    def _downscale(self, tensor: torch.Tensor) -> torch.Tensor:
+        if self.downscale_factor == 1:
+            return tensor
+        return torch.nn.functional.avg_pool2d(
+            tensor,
+            kernel_size=self.downscale_factor,
+            stride=self.downscale_factor,
+        )
+
+    def forward(
+        self,
+        target: torch.Tensor,
+        mu: torch.Tensor,
+        sigma: torch.Tensor,
+        marker_embeddings: torch.Tensor,
+    ) -> torch.Tensor:
+        """
+        Args:
+            target: [B, C, H, W] ground truth
+            mu:     [B, C, H, W] predicted means
+            sigma:  [B, C, H, W] per-pixel std dev (not log)
+            marker_embeddings: [B, C, model_dim] Hyperkernel embeddings
+
+        Returns:
+            Scalar mean NLL per pixel per channel.
+        """
+        target = target.float()
+        mu = mu.float()
+        sigma = sigma.float()
+        marker_embeddings = marker_embeddings.float()
+
+        if self.downscale_factor > 1:
+            target = self._downscale(target)
+            mu = self._downscale(mu)
+            sigma = self._downscale(sigma)
+
+        B, C, H, W = target.shape
+        N = H * W
+
+        assert H == W == self.covariance_module.grid_size, (
+            f"Image must be square with H == W == grid_size, "
+            f"got {H}x{W} vs grid_size={self.covariance_module.grid_size}."
+        )
+
+        target_bnc = target.reshape(B, C, N).permute(0, 2, 1)  # [B, N, C]
+        mu_bnc = mu.reshape(B, C, N).permute(0, 2, 1)
+        sigma_bnc = sigma.reshape(B, C, N).permute(0, 2, 1)
+
+        total_log_prob = torch.zeros(1, device=self.device, dtype=torch.float32)
+        for b in range(B):
+            total_log_prob = total_log_prob + self.covariance_module.log_prob_joint(
+                mu_bnc[b],
+                sigma_bnc[b],
+                target_bnc[b],
+                marker_embeddings[b],
+            )
+
+        return -total_log_prob / (B * N * C)
+
+
+class HybridKroneckerMarkerGPNLLLoss(nn.Module):
+    """
+    Hybrid loss: standard pixel-wise NLL + Kronecker marker GP NLL.
+
+    L = (1 - lambda_gp) * L_standard + lambda_gp * L_kronecker_marker_gp
+
+    Drop-in replacement for HybridKroneckerGPNLLLoss with additional
+    marker_embeddings argument in forward().
+    """
+
+    def __init__(
+        self,
+        covariance_module,
+        lambda_gp: float = 0.1,
+        downscale_factor: int = 1,
+        device=None,
+    ):
+        super().__init__()
+        self.lambda_gp = lambda_gp
+        self.gp_loss = KroneckerMarkerGPNLLLoss(
+            covariance_module=covariance_module,
+            downscale_factor=downscale_factor,
+            device=device,
+        )
+
+    def forward(
+        self,
+        target: torch.Tensor,
+        mu: torch.Tensor,
+        logvar: torch.Tensor,
+        marker_embeddings: torch.Tensor,
+    ) -> tuple[torch.Tensor, dict]:
+        """
+        Args:
+            target: [B, C, H, W] ground truth
+            mu:     [B, C, H, W] predicted means
+            logvar: [B, C, H, W] predicted log-variances
+            marker_embeddings: [B, C, model_dim] Hyperkernel embeddings
+
+        Returns:
+            total_loss: Combined scalar loss.
+            loss_dict:  {"standard_nll", "gp_nll", "total_loss"}.
+        """
+        var = torch.exp(logvar)
+        standard_nll = torch.mean((target - mu) ** 2 / (var + 1e-8) + logvar)
+
+        sigma = torch.sqrt(var)
+        gp_nll = self.gp_loss(target, mu, sigma, marker_embeddings)
+
+        total_loss = (1 - self.lambda_gp) * standard_nll + self.lambda_gp * gp_nll
+
+        loss_dict = {
+            "standard_nll": standard_nll.item(),
+            "gp_nll": gp_nll.item(),
+            "total_loss": total_loss.item(),
+        }
+        return total_loss, loss_dict
