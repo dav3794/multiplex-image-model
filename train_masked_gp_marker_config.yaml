@@ -1,0 +1,74 @@
+# Configuration for training with Kronecker Marker GP loss
+# Extends standard GP config with marker covariance from Hyperkernel embeddings
+
+# ============================================================================
+# GP LOSS CONFIGURATION
+# ============================================================================
+use_gp_loss: true
+use_kronecker_gp: true
+use_marker_covariance: true          # Enable marker covariance (K_C from embeddings)
+marker_embed_dim: 32                  # Projection dim for embedding -> K_C
+marker_jitter: 1e-2                   # Jitter for K_C numerical stability
+lambda_gp: 0.1
+gp_kernel_jitter: 1e-2
+gp_lengthscale: 5.0
+gp_max_cg_iterations: 50
+gp_downscale_factor: 1
+gp_learn_lengthscale: false           # Not applicable for Kronecker
+
+# ============================================================================
+# STANDARD TRAINING CONFIGURATION
+# ============================================================================
+encoder:
+    ma_layers_blocks: [4,]
+    ma_embedding_dims: [16,]
+    pm_layers_blocks: [4, 4, 4]
+    pm_embedding_dims: [128, 256, 512]
+    use_latent_norm: true
+
+    hyperkernel:
+      kernel_size: 1
+      padding: 0
+      stride: 1
+      use_bias: true
+
+decoder:
+  decoded_embed_dim: 384
+  num_blocks: 1
+
+  hyperkernel:
+      kernel_size: 1
+      padding: 0
+      stride: 1
+      use_bias: true
+
+# Data configuration
+panel_config: configs/all_panels_config.yaml
+tokenizer_config: configs/all_markers_tokenizer.yaml
+input_image_size: [112, 112]
+num_workers: 8
+batch_size: 8
+
+# Training configuration
+device: cuda
+lr: 5e-4
+final_lr: 1e-5
+weight_decay: 0.0001
+gradient_accumulation_steps: 1
+epochs: 200
+frac_warmup_steps: 0.01
+min_channels_frac: 0.75
+spatial_masking_ratio: 0.6
+fully_masked_channels_max_frac: 0.5
+mask_patch_size: 8
+from_checkpoint: null
+reset_lr_schedule: false
+checkpoints_dir: checkpoints
+save_checkpoint_freq: 5
+beta: 0.5
+
+# Comet.ml logging configuration
+tags: ['SZARY', 'GP', 'kronecker', 'marker-covariance']
+comet_project: multiplex-image-model
+comet_workspace: micha-zmys-owski
+comet_api_key: null

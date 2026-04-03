@@ -97,6 +97,7 @@ from .immuvis import (
 
 # Gaussian Process components
 from .gp_covariance import (
+    KroneckerMarkerCovariance,
     LowRankPlusSpatialCovariance,
 )
 
@@ -133,5 +134,6 @@ __all__ = [
     "MultiplexImageDecoder",
     "MultiplexAutoencoder",
     # Gaussian Process components
+    "KroneckerMarkerCovariance",
     "LowRankPlusSpatialCovariance",
 ]
