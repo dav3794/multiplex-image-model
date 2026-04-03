@@ -49,6 +49,7 @@ from multiplex_model.utils import (
     get_scheduler_with_warmup,
     init_experiment,
     log_training_metrics,
+    log_validation_batch_metrics,
     log_validation_images,
     log_validation_metrics,
     plot_reconstructs_with_masks,
@@ -296,6 +297,7 @@ def test_masked_gp(
     all_latents = []
     all_channel_variances = []
     all_channel_maes = []
+    all_channel_mses = []
 
     with torch.no_grad():
         for idx, (img, channel_ids, panel_idx, img_path) in enumerate(
@@ -328,8 +330,18 @@ def test_masked_gp(
             # Per-channel statistics
             variance_per_channel = torch.exp(logvar).mean(dim=(0, 2, 3))
             mae_per_channel = torch.abs(img - mi).mean(dim=(0, 2, 3))
+            mse_per_channel = torch.square(img - mi).mean(dim=(0, 2, 3))
             all_channel_variances.append(variance_per_channel.cpu())
             all_channel_maes.append(mae_per_channel.cpu())
+            all_channel_mses.append(mse_per_channel.cpu())
+
+            batch_var_mse_corr = torch.corrcoef(
+                torch.stack([variance_per_channel.cpu(), mse_per_channel.cpu()])
+            )[0, 1].item()
+            log_validation_batch_metrics(
+                variance_mse_correlation_per_batch=batch_var_mse_corr,
+                step=epoch * len(test_dataloader) + idx,
+            )
 
             # Compute loss
             if use_gp_loss and gp_loss_fn is not None:
@@ -398,11 +410,15 @@ def test_masked_gp(
     all_latents = torch.cat(all_latents)
     rankme = RankMe(all_latents)
 
-    # Variance-MAE correlation
+    # Variance-MAE/MSE correlation
     all_channel_variances = torch.cat(all_channel_variances)
     all_channel_maes = torch.cat(all_channel_maes)
+    all_channel_mses = torch.cat(all_channel_mses)
     variance_mae_corr = torch.corrcoef(
         torch.stack([all_channel_variances.flatten(), all_channel_maes.flatten()])
+    )[0, 1].item()
+    variance_mse_corr = torch.corrcoef(
+        torch.stack([all_channel_variances.flatten(), all_channel_mses.flatten()])
     )[0, 1].item()
 
     val_metrics = {
@@ -411,6 +427,7 @@ def test_masked_gp(
         "val_mse": val_mse,
         "latent_rankme": rankme,
         "variance_mae_correlation": variance_mae_corr,
+        "variance_mse_correlation": variance_mse_corr,
         "epoch": epoch,
     }
     
@@ -428,6 +445,7 @@ def test_masked_gp(
     print(f"MAE: {val_mae:.6f}")
     print(f"MSE: {val_mse:.6f}")
     print(f"Pearson MAE vs Var: {variance_mae_corr:.4f}")
+    print(f"Pearson MSE vs Var: {variance_mse_corr:.4f}")
     print("=" * 90)
     print()
 

@@ -356,6 +356,7 @@ def log_validation_metrics(
     latent_rankme: float,
     epoch: int,
     variance_mae_correlation: float | None = None,
+    variance_mse_correlation: float | None = None,
     val_standard_nll: float | None = None,
     val_gp_nll: float | None = None,
 ) -> None:
@@ -368,6 +369,7 @@ def log_validation_metrics(
         latent_rankme (float): RankMe metric for latent representations
         epoch (int): Current epoch number
         variance_mae_correlation (Optional[float]): Pearson correlation between predicted variances and MAEs per channel
+        variance_mse_correlation (Optional[float]): Pearson correlation between predicted variances and MSEs per channel
     """
     if _experiment is None:
         return
@@ -380,11 +382,31 @@ def log_validation_metrics(
     }
     if variance_mae_correlation is not None:
         metrics["val/variance_mae_correlation"] = variance_mae_correlation
+    if variance_mse_correlation is not None:
+        metrics["val/variance_mse_correlation"] = variance_mse_correlation
     if val_standard_nll is not None:
         metrics["val/standard_nll"] = val_standard_nll
     if val_gp_nll is not None:
         metrics["val/gp_nll"] = val_gp_nll
     _experiment.log_metrics(metrics, epoch=epoch)
+
+
+def log_validation_batch_metrics(
+    variance_mse_correlation_per_batch: float,
+    step: int,
+) -> None:
+    """Log per-batch validation metrics to Comet.ml.
+
+    Args:
+        variance_mse_correlation_per_batch (float): Pearson correlation between predicted variances and MSEs per channel for a single batch
+        step (int): Global step number
+    """
+    if _experiment is None:
+        return
+    _experiment.log_metrics(
+        {"val/variance_mse_correlation_per_batch": variance_mse_correlation_per_batch},
+        step=step,
+    )
 
 
 def log_validation_images(
