@@ -368,15 +368,14 @@ def test_masked_gp(
                     loss, loss_dict = gp_loss_fn(img, mi, logvar)
                 running_standard_nll += loss_dict["standard_nll"]
                 running_gp_nll += loss_dict["gp_nll"]
-                if use_marker_covariance:
+                if use_marker_covariance and idx == 0:
                     _, _, K_C = gp_covariance_module._compute_marker_eigen(marker_emb[0])
                     eigvals = torch.linalg.eigvalsh(K_C)
-                    if idx == 0:
-                        log_validation_batch_metrics(
-                            marker_cov_min_eigenvalue=eigvals.min().item(),
-                            marker_cov_condition_number=(eigvals.max() / eigvals.min()).item(),
-                            step=epoch,
-                        )
+                    print(
+                        f"  Marker cov diagnostics — "
+                        f"min_eigval: {eigvals.min().item():.4f}, "
+                        f"condition_number: {(eigvals.max() / eigvals.min()).item():.2f}"
+                    )
             else:
                 loss = nll_loss(img, mi, logvar)
             
