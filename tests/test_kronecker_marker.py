@@ -113,8 +113,8 @@ def test_log_prob_joint_matches_dense():
     # Our method
     log_prob = mod.log_prob_joint(mu_all, U_all, targets, marker_emb)
 
-    # Dense ground truth
-    E = mod.embedding_projection(marker_emb)
+    # Dense ground truth — mirror the module's row-normalization
+    E = torch.nn.functional.normalize(mod.embedding_projection(marker_emb), p=2, dim=1)
     K_C = E @ E.T + mod.marker_jitter * torch.eye(C)
 
     V = mod.V
