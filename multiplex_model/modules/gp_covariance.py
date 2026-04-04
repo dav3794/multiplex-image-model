@@ -517,6 +517,10 @@ class KroneckerMarkerCovariance(nn.Module):
                 K_C: [C, C] marker covariance
         """
         E = self.embedding_projection(marker_embeddings)  # [C, D]
+        # Normalize rows to unit norm so K_C is a correlation matrix (diagonal = 1 + jitter).
+        # This decouples K_C conditioning from embedding_projection weight scale, keeping
+        # condition numbers bounded by C rather than growing with embedding magnitude.
+        E = nn.functional.normalize(E, p=2, dim=1)
         C = E.shape[0]
         K_C = E @ E.T + self.marker_jitter * torch.eye(C, device=E.device, dtype=E.dtype)
         lam_C, V_C = torch.linalg.eigh(K_C)
@@ -594,7 +598,7 @@ class KroneckerMarkerCovariance(nn.Module):
         Returns:
             [C, C] correlation matrix (ones on diagonal).
         """
-        E = self.embedding_projection(marker_embeddings)
+        E = nn.functional.normalize(self.embedding_projection(marker_embeddings), p=2, dim=1)
         K_C = E @ E.T + self.marker_jitter * torch.eye(E.shape[0], device=E.device, dtype=E.dtype)
         # Normalize to correlation: corr[i,j] = K_C[i,j] / sqrt(K_C[i,i] * K_C[j,j])
         diag_sqrt = torch.sqrt(torch.diag(K_C))
