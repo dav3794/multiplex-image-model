@@ -339,6 +339,7 @@ def test_masked_gp(
             output = model.decode(latent, channel_ids)
             mi, logvar = output.unbind(dim=-1)
             mi = torch.sigmoid(mi)
+            logvar = torch.clamp(logvar, -15.0, 15.0)
 
             latent = normalize(latent.mean(dim=(2, 3)), p=2, dim=1)
             all_latents.append(latent.cpu())

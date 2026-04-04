@@ -416,6 +416,7 @@ def log_validation_images(
     epoch: int,
     masked_channels_names: str,
     img_idx: int,
+    name_suffix: str = "",
 ) -> None:
     """Log validation reconstruction images to Comet.ml.
 
@@ -426,6 +427,7 @@ def log_validation_images(
         epoch (int): Current epoch number
         masked_channels_names (str): Names of masked channels
         img_idx (int): Index of the image in the batch
+        name_suffix (str): Optional suffix appended to the image name
     """
     if _experiment is None:
         return
@@ -438,7 +440,7 @@ def log_validation_images(
 
     _experiment.log_image(
         img,
-        name=f"val/reconstructions_panel-{panel_idx}_epoch-{epoch + 1}_img-{img_idx}",
+        name=f"val/reconstructions_panel-{panel_idx}_epoch-{epoch + 1}_img-{img_idx}{name_suffix}",
         step=epoch,
         metadata={
             "panel_idx": panel_idx,
