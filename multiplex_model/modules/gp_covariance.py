@@ -523,7 +523,12 @@ class KroneckerMarkerCovariance(nn.Module):
         E = nn.functional.normalize(E, p=2, dim=1)
         C = E.shape[0]
         K_C = E @ E.T + self.marker_jitter * torch.eye(C, device=E.device, dtype=E.dtype)
-        lam_C, V_C = torch.linalg.eigh(K_C)
+        # Use float64 for eigh: when C > marker_embed_dim, K_C has C-D repeated eigenvalues
+        # at exactly marker_jitter. LAPACK's divide-and-conquer fails on near-repeated
+        # eigenvalues in float32; float64 precision resolves convergence reliably.
+        lam_C, V_C = torch.linalg.eigh(K_C.double())
+        lam_C = lam_C.to(E.dtype)
+        V_C = V_C.to(E.dtype)
 
         # triple_eigs[i, j, k] = kron_eigs[i,j] * lam_C[k] + kernel_jitter
         triple_eigs = self.kron_eigs.unsqueeze(-1) * lam_C.unsqueeze(0).unsqueeze(0) + self.kernel_jitter
