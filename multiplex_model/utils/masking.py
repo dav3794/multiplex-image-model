@@ -58,15 +58,15 @@ def apply_channel_masking(
     )
     num_channels_to_mask = np.random.randint(1, max_channels_to_mask + 1)
 
-    masked_img = []
-    active_channel_ids = []
+    masked_img_list: list[torch.Tensor] = []
+    active_channel_ids_list: list[torch.Tensor] = []
     for b_i in range(batch_size):
         channels_to_keep = torch.randperm(num_sampled_channels)[num_channels_to_mask:]
-        masked_img.append(img[b_i : b_i + 1, channels_to_keep, :, :])
-        active_channel_ids.append(channel_ids[b_i : b_i + 1, channels_to_keep])
+        masked_img_list.append(img[b_i : b_i + 1, channels_to_keep, :, :])
+        active_channel_ids_list.append(channel_ids[b_i : b_i + 1, channels_to_keep])
 
-    masked_img = torch.cat(masked_img, dim=0)  # [B, C_active, H, W]
-    active_channel_ids = torch.cat(active_channel_ids, dim=0)  # [B, C_active]
+    masked_img = torch.cat(masked_img_list, dim=0)  # [B, C_active, H, W]
+    active_channel_ids = torch.cat(active_channel_ids_list, dim=0)  # [B, C_active]
 
     return img, channel_ids, masked_img, active_channel_ids
 

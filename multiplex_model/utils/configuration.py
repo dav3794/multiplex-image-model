@@ -3,7 +3,7 @@
 import os
 from typing import Any
 
-from pydantic import BaseModel, Field, field_validator
+from pydantic import BaseModel, Field, ValidationInfo, field_validator
 
 from .train_logging import get_run_name
 
@@ -101,7 +101,7 @@ class EncoderConfig(BaseModel):
 
     @field_validator("ma_embedding_dims")
     @classmethod
-    def validate_ma_lengths(cls, v: list[int], info) -> list[int]:
+    def validate_ma_lengths(cls, v: list[int], info: ValidationInfo) -> list[int]:
         if "ma_layers_blocks" in info.data:
             blocks = info.data["ma_layers_blocks"]
             if len(v) != len(blocks):
@@ -121,7 +121,7 @@ class EncoderConfig(BaseModel):
 
     @field_validator("pm_embedding_dims")
     @classmethod
-    def validate_pm_lengths(cls, v: list[int], info) -> list[int]:
+    def validate_pm_lengths(cls, v: list[int], info: ValidationInfo) -> list[int]:
         if len(v) == 0:
             raise ValueError(
                 "pm_embedding_dims cannot be empty - at least one pan-marker layer is required"
@@ -160,7 +160,7 @@ class DecoderConfig(BaseModel):
 
     @field_validator("block_type", mode="before")
     @classmethod
-    def validate_block_type(cls, v) -> ModuleConfig:
+    def validate_block_type(cls, v: Any) -> ModuleConfig:
         if v is None:
             return ModuleConfig(type="convnext")
         if isinstance(v, ModuleConfig):

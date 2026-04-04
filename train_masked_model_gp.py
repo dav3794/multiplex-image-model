@@ -436,18 +436,18 @@ def test_masked_gp(
     val_mae = running_mae / len(test_dataloader)
     val_mse = running_mse / len(test_dataloader)
 
-    all_latents = torch.cat(all_latents)
-    rankme = RankMe(all_latents)
+    latents = torch.cat(all_latents)
+    rankme = RankMe(latents)
 
     # Variance-MAE/MSE correlation
-    all_channel_variances = torch.cat(all_channel_variances)
-    all_channel_maes = torch.cat(all_channel_maes)
-    all_channel_mses = torch.cat(all_channel_mses)
+    all_variances = torch.cat(all_channel_variances)
+    all_maes = torch.cat(all_channel_maes)
+    all_mses = torch.cat(all_channel_mses)
     variance_mae_corr = torch.corrcoef(
-        torch.stack([all_channel_variances.flatten(), all_channel_maes.flatten()])
+        torch.stack([all_variances.flatten(), all_maes.flatten()])
     )[0, 1].item()
     variance_mse_corr = torch.corrcoef(
-        torch.stack([all_channel_variances.flatten(), all_channel_mses.flatten()])
+        torch.stack([all_variances.flatten(), all_mses.flatten()])
     )[0, 1].item()
 
     val_metrics = {

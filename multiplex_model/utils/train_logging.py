@@ -29,7 +29,7 @@ def plot_reconstructs_with_uncertainty(
     ncols: int = 9,
     scale_by_max: bool = True,
     partially_masked_ids: list[int] = [],
-):
+) -> plt.Figure:
     """Plot the original image and the reconstructed image with uncertainty.
 
     Args:
@@ -66,7 +66,7 @@ def plot_reconstructs_with_uncertainty(
         ax_uncertainty.axis("off")
 
         if j < num_channels:
-            marker_name = markers_names_map[channel_ids[0, j].item()]
+            marker_name = markers_names_map[int(channel_ids[0, j].item())]
             ax_img.imshow(orig_img[0, j].cpu().numpy(), cmap="CMRmap", vmin=0, vmax=1)
             ax_img.set_title(f"Original\n{marker_name}")
 
@@ -111,7 +111,7 @@ def plot_reconstructs_with_masks(
     fully_masked_ids: list[int],
     markers_names_map: dict[int, str],
     ncols: int = 9,
-):
+) -> plt.Figure:
     """Plot the original image, masked image (with white pixels where masked), and reconstruction.
 
     Args:
@@ -148,7 +148,7 @@ def plot_reconstructs_with_masks(
         ax_reconstructed = ax_flat[i + 2]
 
         if j < num_channels:
-            channel_id = channel_ids[0, j].item()
+            channel_id = int(channel_ids[0, j].item())
             marker_name = markers_names_map[channel_id]
 
             # Show original
@@ -182,7 +182,7 @@ def plot_reconstructs_with_masks(
                 masked_idx = channel_to_masked_idx[channel_id]
 
                 # Convert grayscale to RGBA using colormap (image already normalized to 0-1)
-                cmap = plt.cm.CMRmap
+                cmap = plt.cm.CMRmap  # type: ignore[attr-defined]
                 img_data = orig_img[0, j].cpu().numpy()
                 rgba_img = cmap(img_data)  # Apply colormap directly
 
@@ -259,8 +259,8 @@ def get_next_version_number(
 
         latest_experiment = experiments[0]
 
-        version = re.match(version_pattern, latest_experiment.name)
-        version = int(version.group(1))
+        m = re.match(version_pattern, latest_experiment.name)
+        version = int(m.group(1)) if m else 0
 
         # Return next version (1 if no versions exist)
         return version + 1
