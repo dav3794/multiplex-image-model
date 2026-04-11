@@ -390,6 +390,40 @@ class MultiplexAutoencoder(nn.Module):
             **decoder_config,
         )
 
+    @classmethod
+    def load_from_checkpoint(
+        cls,
+        checkpoint: str | dict,
+        map_location: str | torch.device | None = None,
+        model_config: dict | None = None,
+        strict: bool = True,
+    ) -> "MultiplexAutoencoder":
+        """Create a model and load weights from a checkpoint.
+
+        Args:
+            checkpoint: Path to checkpoint file or loaded checkpoint dict.
+            map_location: Optional map_location passed to torch.load when checkpoint is a path.
+            model_config: Model config to use if checkpoint lacks 'model_config'.
+            strict: Whether to strictly enforce that the keys in state_dict match the model.
+
+        Returns:
+            MultiplexAutoencoder: Model with weights loaded from checkpoint.
+        """
+        if isinstance(checkpoint, dict):
+            checkpoint_data = checkpoint
+        else:
+            checkpoint_data = torch.load(checkpoint, map_location=map_location)
+
+        resolved_config = checkpoint_data.get("model_config", model_config)
+        if resolved_config is None:
+            raise ValueError(
+                "Checkpoint is missing 'model_config'; provide model_config to load the model."
+            )
+
+        model = cls(**resolved_config)
+        model.load_state_dict(checkpoint_data["model_state_dict"], strict=strict)
+        return model
+
     def encode(
         self,
         x: torch.Tensor,
