@@ -1,5 +1,6 @@
 from typing import Callable
 from abc import ABC
+import warnings
 
 import numpy as np
 import torch
@@ -165,6 +166,10 @@ class Pipeline:
                 f"Operation '{operation}' is not defined in transforms. "
                 f"Available transforms: {list(self.transforms.keys())}"
             )
+
+        for name, transform in self.transforms.items():
+            if name not in self.operation_order and not isinstance(transform, Identity):
+                warnings.warn(f"Transform '{name}' is passed but is not in the operation order and will not be applied.")
 
     def __call__(self, img, dataset=None, marker_names=None):
         for operation in self.operation_order:

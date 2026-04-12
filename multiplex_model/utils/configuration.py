@@ -408,7 +408,6 @@ class TrainingConfig(BaseModel):
         
         marker_stats = panel_config.get("marker_stats")
         if isinstance(marker_stats, str):
-            print(f"Loading marker stats from CSV: {marker_stats}")
             resolved_stats = load_normalization_stats_csv(marker_stats)
             panel_config = panel_config.copy()
             panel_config["marker_stats"] = resolved_stats
