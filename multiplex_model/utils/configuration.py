@@ -97,7 +97,7 @@ class EncoderConfig(BaseModel):
     @classmethod
     def validate_blocks(cls, v: list[int]) -> list[int]:
         if any(x < 0 for x in v):
-            raise ValueError("All block counts must be positive")
+            raise ValueError("All block counts must be non-negative")
         return v
 
     @field_validator("ma_embedding_dims", "pm_embedding_dims")
