@@ -431,6 +431,8 @@ class TrainingConfig(BaseModel):
             yaml = YAML(typ="safe")
             with open(config_path, "r") as handle:
                 tokenizer_config = yaml.load(handle)
+        else:
+            tokenizer_config = v
 
         return tokenizer_config
 
