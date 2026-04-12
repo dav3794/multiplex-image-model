@@ -290,10 +290,10 @@ class TrainingConfig(BaseModel):
     )
 
     # Config file paths
-    panel_config: dict[str, Any] = Field(
+    panel_config: dict[str, Any] | str = Field(
         ..., description="Panel configuration data or path to panel configuration file"
     )
-    tokenizer_config: dict[str, Any] = Field(
+    tokenizer_config: dict[str, Any] | str = Field(
         ..., description="Tokenizer configuration data or path to tokenizer configuration file"
     )
 
@@ -401,12 +401,12 @@ class TrainingConfig(BaseModel):
             with open(config_path, "r") as handle:
                 panel_config = yaml.load(handle)
 
+            panel_config_dir = os.path.dirname(os.path.abspath(config_path))
+        
         else:
-            raise ValueError(
-                "panel_config must be a path to a YAML file containing the panel config"
-            )
+            panel_config = v
+            panel_config_dir = ""
 
-        panel_config_dir = os.path.dirname(os.path.abspath(config_path))
         marker_stats = panel_config.get("marker_stats")
         if isinstance(marker_stats, str):
             marker_stats_path = os.path.expanduser(marker_stats)
@@ -431,11 +431,6 @@ class TrainingConfig(BaseModel):
             yaml = YAML(typ="safe")
             with open(config_path, "r") as handle:
                 tokenizer_config = yaml.load(handle)
-
-        else:
-            raise ValueError(
-                "tokenizer_config must be a path to a YAML file containing the tokenizer config"
-            )
 
         return tokenizer_config
 

@@ -9,7 +9,7 @@ import torch
 from torch.utils.data import Dataset, Sampler
 
 from .transforms import (
-    OutlierPrunning,
+    OutlierPruning,
     Preprocessing,
     Denoising,
     Scaling,
@@ -129,7 +129,7 @@ class MultiplexDataset(Dataset):
             else Identity()
         )
         self.outlier_pruning = (
-            OutlierPrunning(outlier_pruning_func, **outlier_pruning_kwargs)
+            OutlierPruning(outlier_pruning_func, **outlier_pruning_kwargs)
             if outlier_pruning_func
             else Identity()
         )

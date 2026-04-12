@@ -15,7 +15,7 @@ class ImageFunc(ABC):
 
     def __init__(self, func_name: str, **kwargs):
         assert (
-            func_name in self.available_funcs or func_name is None
+            func_name in self.available_funcs
         ), (
             f"Function '{func_name}' is not supported. "
             f"Available functions: {self.available_funcs}"
@@ -27,7 +27,7 @@ class ImageFunc(ABC):
     def __call__(self, img, **img_kwargs):
         return self._func(img, **img_kwargs, **self.func_kwargs)
 
-class OutlierPrunning(ImageFunc):
+class OutlierPruning(ImageFunc):
     """Class for outlier removal"""
 
     available_funcs = {"percentile_clip"}
@@ -90,7 +90,7 @@ class Scaling(ImageFunc):
         **kwargs,
     ):
         super().__init__(func_name, **kwargs)
-        self.ds_percentiles = ds_percentiles
+        self.ds_percentiles = ds_percentiles or {}
         self.global_scaling_bound = global_scaling_bound
 
     @staticmethod
@@ -121,7 +121,7 @@ class Normalization(ImageFunc):
     def __init__(
         self,
         func_name: str,
-        ds_marker_stats: dict[str, dict[str, tuple[int, int]]],
+        ds_marker_stats: dict[str, dict[str, tuple[float, float]]],
         **kwargs,
     ):
         super().__init__(func_name, **kwargs)

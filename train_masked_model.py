@@ -370,7 +370,7 @@ if __name__ == "__main__":
             checkpoint,
             model_config=model_config,
         ).to(device)
-        start_epoch = checkpoint["epoch"] + 1
+        start_epoch = checkpoint.get("epoch", -1) + 1
     else:
         model = MultiplexAutoencoder(**model_config).to(device)
 
@@ -394,8 +394,10 @@ if __name__ == "__main__":
     )
 
     if checkpoint is not None:
-        optimizer.load_state_dict(checkpoint["optimizer_state_dict"])
-        scheduler.load_state_dict(checkpoint["scheduler_state_dict"])
+        if "optimizer_state_dict" in checkpoint:
+            optimizer.load_state_dict(checkpoint["optimizer_state_dict"])
+        if "scheduler_state_dict" in checkpoint:
+            scheduler.load_state_dict(checkpoint["scheduler_state_dict"])
 
     # Initialize Comet.ml experiment
     comet_config = config.model_dump()
