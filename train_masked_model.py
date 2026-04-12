@@ -56,7 +56,6 @@ def train_masked(
     start_epoch=0,
     save_checkpoint_every=5,
     checkpoints_path="checkpoints",
-    model_config: dict | None = None,
 ):
     """Train a masked autoencoder (decode the remaining channels) with the given parameters."""
     model.train()
@@ -136,8 +135,8 @@ def train_masked(
             "scheduler_state_dict": scheduler.state_dict(),
             "epoch": epoch,
         }
-        if model_config is not None:
-            checkpoint["model_config"] = model_config
+        if hasattr(model, "get_architecture_config"):
+            checkpoint["model_config"] = model.get_architecture_config()
         if (epoch + 1) % save_checkpoint_every == 0:
             torch.save(
                 checkpoint,
@@ -150,8 +149,8 @@ def train_masked(
     checkpoint = {
         "model_state_dict": model.state_dict(),
     }
-    if model_config is not None:
-        checkpoint["model_config"] = model_config
+    if hasattr(model, "get_architecture_config"):
+        checkpoint["model_config"] = model.get_architecture_config()
     torch.save(checkpoint, final_model_path)
 
 
@@ -421,7 +420,6 @@ if __name__ == "__main__":
         save_checkpoint_every=config.save_checkpoint_freq,
         checkpoints_path=config.checkpoints_dir,
         beta=config.beta,
-        model_config=model_config,
     )
 
     finish_experiment()

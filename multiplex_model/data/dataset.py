@@ -9,6 +9,7 @@ import torch
 from torch.utils.data import Dataset, Sampler
 
 from .transforms import (
+    OutlierPrunning,
     Preprocessing,
     Denoising,
     Scaling,
@@ -30,18 +31,20 @@ class MultiplexDataset(Dataset):
         global_scaling_bound: float = 5.0,
         denoising_func: Literal["median", "gaussian", "butterworth"] | None = "butterworth",
         normalization_func: Literal["zscore_ds"] | None = None,
+        outlier_pruning_func: Literal["percentile_clip"] | None = None,
         operation_order: list[str] = [
             "transform",
             "preprocessing",
             "denoising",
             "scaling",
-            "normalization",
         ],
         file_extension: Literal["tiff", "npy"] = "tiff",
         preprocessing_kwargs: dict = {},
         denoising_kwargs: dict = {},
         scaling_kwargs: dict = {},
         normalization_kwargs: dict = {},
+        outlier_pruning_kwargs: dict = {},
+
     ):
         """Dataset for loading multiplex images from multiple panels.
         The order of operations is given by `operation_order`.
@@ -58,6 +61,7 @@ class MultiplexDataset(Dataset):
             scaling_func (Literal['minmax', 'percentile', 'global_clip'], optional): Function to use for scaling. Skips scaling if None. Defaults to 'percentile'.
             global_scaling_bound (float, optional): Global upper bound for scaling if `global_clip` is chosen as `scaling_func`. Defaults to 5.0.
             normalization_func (Literal['zscore_ds'], optional): Function to use for normalization. Skips normalization if None. Defaults to 'zscore_ds'.
+            outlier_pruning_func (Literal['percentile_clip'], optional): Function to use for outlier pruning. Skips outlier pruning if None. Defaults to 'percentile_clip'.
             operation_order (list[str], optional): Order of operations to be applied.
                 Defaults to ['transform', 'preprocessing', 'denoising', 'scaling', 'normalization'].
             file_extension (Literal['tiff', 'npy'], optional): File extension of the images. Defaults to 'tiff'.
@@ -65,6 +69,7 @@ class MultiplexDataset(Dataset):
             denoising_kwargs (dict, optional): Additional keyword arguments for denoising function. Defaults to {}.
             scaling_kwargs (dict, optional): Additional keyword arguments for scaling function. Defaults to {}.
             normalization_kwargs (dict, optional): Additional keyword arguments for normalization function. Defaults to {}.
+            outlier_pruning_kwargs (dict, optional): Additional keyword arguments for outlier pruning function. Defaults to {}.
         """
         assert "paths" in panels_config, (
             "Panels config must have 'paths' attribute with paths of splits of the data."
@@ -123,6 +128,11 @@ class MultiplexDataset(Dataset):
             if normalization_func
             else Identity()
         )
+        self.outlier_pruning = (
+            OutlierPrunning(outlier_pruning_func, **outlier_pruning_kwargs)
+            if outlier_pruning_func
+            else Identity()
+        )
         self.transform = TorchvisionTransform(transform) if transform else Identity()
 
         self.pipeline = Pipeline(
@@ -132,6 +142,7 @@ class MultiplexDataset(Dataset):
                 "scaling": self.scale,
                 "normalization": self.norm,
                 "transform": self.transform,
+                "outlier_pruning": self.outlier_pruning,
             },
             operation_order=operation_order,
         )
@@ -150,7 +161,7 @@ class MultiplexDataset(Dataset):
         marker_names = self.ds_markers[dataset]
 
         img = self.read_file_func(img_path)
-        self.pipeline(img, dataset=dataset, marker_names=marker_names)
+        img = self.pipeline(img, dataset=dataset, marker_names=marker_names)
 
         img = torch.tensor(img)
 

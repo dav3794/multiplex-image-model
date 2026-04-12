@@ -26,6 +26,16 @@ class ImageFunc(ABC):
     def __call__(self, img, **img_kwargs):
         return self._func(img, **img_kwargs, **self.func_kwargs)
 
+class OutlierPrunning(ImageFunc):
+    """Class for outlier removal"""
+
+    available_funcs = {"percentile_clip"}
+
+    @staticmethod
+    def percentile_clip(x, p=99, **kwargs):
+        upper_bound = np.percentile(x, p, axis=(1, 2), keepdims=True)
+        return np.clip(x, None, upper_bound)
+
 
 class Preprocessing(ImageFunc):
     """Class for applying preprocessing functions to images."""

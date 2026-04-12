@@ -77,6 +77,14 @@ class EncoderConfig(BaseModel):
         default=True,
         description="Whether to apply LayerNorm to the latent representation",
     )
+    use_mask_token: bool = Field(
+        default=False,
+        description="Whether to replace masked pixels with a learnable token",
+    )
+    mask_token_init: float = Field(
+        default=0.0,
+        description="Initial value for the mask token",
+    )
     encoder_type: str | ModuleConfig | None = Field(
         default="convnext",
         description=(

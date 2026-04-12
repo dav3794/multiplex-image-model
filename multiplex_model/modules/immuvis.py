@@ -1,3 +1,4 @@
+import copy
 from typing import Literal
 
 import torch
@@ -151,6 +152,8 @@ class MultiplexImageEncoder(nn.Module):
         pm_layers_blocks: list[int],
         pm_embedding_dims: list[int],
         use_latent_norm: bool = False,
+        use_mask_token: bool = False,
+        mask_token_init: float = 0.0,
         encoder_type: str | type[Encoder] | dict = "convnext",
     ):
         """Initialize the Multiplex Image Encoder.
@@ -163,6 +166,8 @@ class MultiplexImageEncoder(nn.Module):
             pm_layers_blocks (List[int]): Number of blocks in each pan-marker layer.
             pm_embedding_dims (List[int]): Embedding dimensions for each pan-marker layer.
             use_latent_norm (bool, optional): Whether to apply LayerNorm to the latent representation. Defaults to False.
+            use_mask_token (bool, optional): Whether to replace masked pixels with a learnable token. Defaults to False.
+            mask_token_init (float, optional): Initial value for the mask token. Defaults to 0.0.
             encoder_type (Union[str, Type[Encoder], Dict], optional): Type of encoder to use.
                 Can be a string (registry name), Encoder class, or config dict with 'type' and 'module_parameters'.
                 For ConvNeXtEncoder, module_parameters can include 'block_parameters' dict with ConvNextBlock parameters
@@ -170,6 +175,11 @@ class MultiplexImageEncoder(nn.Module):
                 Defaults to "convnext".
         """
         super().__init__()
+
+        self.use_mask_token = use_mask_token
+        self.mask_token = (
+            nn.Parameter(torch.tensor(mask_token_init)) if use_mask_token else None
+        )
 
         # Resolve encoder class
         encoder_cls = resolve_encoder_class(encoder_type)
@@ -223,6 +233,7 @@ class MultiplexImageEncoder(nn.Module):
         self,
         x: torch.Tensor,
         encoded_indices: torch.Tensor,
+        spatial_mask: torch.Tensor | None = None,
         return_features: bool = False,
     ) -> dict:
         """Forward pass of the encoder.
@@ -230,6 +241,7 @@ class MultiplexImageEncoder(nn.Module):
         Args:
             x (torch.Tensor): Multiplex images batch tensor with shape [B, C, H, W]
             encoded_indices (torch.Tensor): Indices of the markers in channels tensor with shape [B, C].
+            spatial_mask (torch.Tensor, optional): Boolean mask for masked pixels [B, C, H, W].
             return_features (bool, optional): If True, returns the features after each block. Defaults to False.
 
         Returns:
@@ -239,6 +251,9 @@ class MultiplexImageEncoder(nn.Module):
         features = []
 
         B, C, H, W = x.shape
+        if self.use_mask_token and spatial_mask is not None:
+            mask_token = self.mask_token.to(dtype=x.dtype)
+            x = torch.where(spatial_mask, mask_token, x)
         x = x.reshape(B * C, 1, H, W)
         x = self.marker_agnostic_encoder(x, return_features=return_features)
         if return_features:
@@ -369,6 +384,12 @@ class MultiplexAutoencoder(nn.Module):
             decoder_config (dict): Configuration for the decoder.
         """
         super().__init__()
+        self._architecture_config = {
+            "num_channels": num_channels,
+            "encoder_config": copy.deepcopy(encoder_config),
+            "decoder_config": copy.deepcopy(decoder_config),
+        }
+
         self.latent_dim = encoder_config["pm_embedding_dims"][-1]
         self.num_channels = num_channels
 
@@ -389,6 +410,28 @@ class MultiplexAutoencoder(nn.Module):
             num_channels=self.num_channels,
             **decoder_config,
         )
+
+    def get_architecture_config(self, by_alias: bool = False) -> dict:
+        """Return the model architecture configuration.
+
+        Args:
+            by_alias: If True, uses config aliases (e.g., 'hyperkernel').
+
+        Returns:
+            dict: Architecture configuration for rebuilding the model.
+        """
+        config = copy.deepcopy(self._architecture_config)
+        if by_alias:
+            config = config.copy()
+            config["encoder"] = config.pop("encoder_config")
+            config["decoder"] = config.pop("decoder_config")
+            config["encoder"]["hyperkernel"] = config["encoder"].pop(
+                "hyperkernel_config"
+            )
+            config["decoder"]["hyperkernel"] = config["decoder"].pop(
+                "hyperkernel_config"
+            )
+        return config
 
     @classmethod
     def load_from_checkpoint(
@@ -428,6 +471,7 @@ class MultiplexAutoencoder(nn.Module):
         self,
         x: torch.Tensor,
         encoded_indices: torch.Tensor,
+        spatial_mask: torch.Tensor | None = None,
         return_features: bool = False,
     ) -> dict:
         """Encode the input images using the encoder.
@@ -435,13 +479,17 @@ class MultiplexAutoencoder(nn.Module):
         Args:
             x (torch.Tensor): Input images tensor with shape (B, C, H, W).
             encoded_indices (torch.Tensor): Indices of the markers in channels.
+            spatial_mask (torch.Tensor, optional): Boolean mask for masked pixels [B, C, H, W].
             return_features (bool, optional): If True, returns the features after encoding. Defaults to False.
 
         Returns:
             dict: A dictionary containing the encoded images tensor (under 'output') and optionally the features.
         """
         encoding_output = self.encoder(
-            x, encoded_indices, return_features=return_features
+            x,
+            encoded_indices,
+            spatial_mask=spatial_mask,
+            return_features=return_features,
         )
         outputs = {"output": encoding_output["output"]}
 
@@ -471,6 +519,7 @@ class MultiplexAutoencoder(nn.Module):
         x: torch.Tensor,
         encoded_indices: torch.Tensor,
         decoded_indices: torch.Tensor,
+        spatial_mask: torch.Tensor | None = None,
         return_features: bool = False,
     ) -> dict:
         """Forward pass of the Multiplex Autoencoder.
@@ -481,12 +530,16 @@ class MultiplexAutoencoder(nn.Module):
                 for encoding.
             decoded_indices (torch.Tensor): Indices of the markers in channels
                 for decoding.
+            spatial_mask (torch.Tensor, optional): Boolean mask for masked pixels [B, C, H, W].
 
         Returns:
             dict: A dictionary containing the reconstructed images tensor (under 'output') and optionally the features.
         """
         encoding_output = self.encode(
-            x, encoded_indices, return_features=return_features
+            x,
+            encoded_indices,
+            spatial_mask=spatial_mask,
+            return_features=return_features,
         )
         x = encoding_output["output"]
         x = self.decode(x, decoded_indices)
