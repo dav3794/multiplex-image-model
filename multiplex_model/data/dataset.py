@@ -6,44 +6,70 @@ from typing import Literal
 import numpy as np
 import tifffile
 import torch
-from cv2 import medianBlur
-from skimage import filters
 from torch.utils.data import Dataset, Sampler
-from torchvision.transforms.functional import crop
 
+from .transforms import (
+    OutlierPruning,
+    Preprocessing,
+    Denoising,
+    Scaling,
+    Normalization,
+    TorchvisionTransform,
+    Pipeline,
+    Identity,
+)
 
-class DatasetFromTIFF(Dataset):
+class MultiplexDataset(Dataset):
     def __init__(
         self,
         panels_config: dict,
         split: str,
         marker_tokenizer: dict[str, int],
         transform=None,
-        use_preprocessing: bool = True,
-        use_median_denoising: bool = False,
-        use_butterworth_filter: bool = True,
-        use_minmax_normalization: bool = False,
-        use_clip_normalization: bool = True,
-        global_upper_bound: float = 5.0,
-        use_global_clip_limits: bool = False,
+        preprocessing_func: Literal["arcsinh", "log1p"] | None = "arcsinh",
+        scaling_func: Literal["minmax", "percentile", "global_clip"] | None = "percentile",
+        global_scaling_bound: float = 5.0,
+        denoising_func: Literal["median", "gaussian", "butterworth"] | None = "butterworth",
+        normalization_func: Literal["zscore_ds"] | None = None,
+        outlier_pruning_func: Literal["percentile_clip"] | None = None,
+        operation_order: list[str] = [
+            "transform",
+            "preprocessing",
+            "denoising",
+            "scaling",
+        ],
         file_extension: Literal["tiff", "npy"] = "tiff",
+        preprocessing_kwargs: dict = {},
+        denoising_kwargs: dict = {},
+        scaling_kwargs: dict = {},
+        normalization_kwargs: dict = {},
+        outlier_pruning_kwargs: dict = {},
+
     ):
         """Dataset for loading multiplex images from multiple panels.
+        The order of operations is given by `operation_order`.
 
         Args:
             panels_config (dict): Configuration dictionary for panels.
             split (str): Name of the data split (e.g., 'train', 'val', 'test').
             marker_tokenizer (dict[str, int]): Tokenizer for marker names.
             transform (_type_, optional): Transform to be applied to the images. Defaults to None.
-            use_preprocessing (bool, optional): Whether to use preprocessing. Defaults to True.
-            use_median_denoising (bool, optional): Whether to use median denoising. Defaults to False.
-            use_butterworth_filter (bool, optional): Whether to use Butterworth filter. Defaults to True.
-            use_minmax_normalization (bool, optional): Whether to use min-max normalization. Defaults to True.
-            use_clip_normalization (bool, optional): Whether to use clipping normalization. Defaults to False.
-            global_upper_bound (float, optional): Global upper bound for clipping normalization if `clip_limits`
-                is not provided in config. Defaults to 5.0.
-            use_global_clip_limits (bool, optional): Whether to use global clip limits for all datasets. Defaults to False.
+            preprocessing_func (Literal['arcsinh', 'log1p'], optional): Function to use for preprocessing. 
+                Skips preprocessing if None. Defaults to 'arcsinh'.
+            denoising_func (Literal['median', 'gaussian', 'butterworth'], optional): Function to use for denoising. 
+            Skips denoising if None. Defaults to 'butterworth'.
+            scaling_func (Literal['minmax', 'percentile', 'global_clip'], optional): Function to use for scaling. Skips scaling if None. Defaults to 'percentile'.
+            global_scaling_bound (float, optional): Global upper bound for scaling if `global_clip` is chosen as `scaling_func`. Defaults to 5.0.
+            normalization_func (Literal['zscore_ds'], optional): Function to use for normalization. Skips normalization if None. Defaults to 'zscore_ds'.
+            outlier_pruning_func (Literal['percentile_clip'], optional): Function to use for outlier pruning. Skips outlier pruning if None. Defaults to 'percentile_clip'.
+            operation_order (list[str], optional): Order of operations to be applied.
+                Defaults to ['transform', 'preprocessing', 'denoising', 'scaling', 'normalization'].
             file_extension (Literal['tiff', 'npy'], optional): File extension of the images. Defaults to 'tiff'.
+            preprocessing_kwargs (dict, optional): Additional keyword arguments for preprocessing function. Defaults to {}.
+            denoising_kwargs (dict, optional): Additional keyword arguments for denoising function. Defaults to {}.
+            scaling_kwargs (dict, optional): Additional keyword arguments for scaling function. Defaults to {}.
+            normalization_kwargs (dict, optional): Additional keyword arguments for normalization function. Defaults to {}.
+            outlier_pruning_kwargs (dict, optional): Additional keyword arguments for outlier pruning function. Defaults to {}.
         """
         assert "paths" in panels_config, (
             "Panels config must have 'paths' attribute with paths of splits of the data."
@@ -57,6 +83,8 @@ class DatasetFromTIFF(Dataset):
         assert "markers" in panels_config, (
             "Panels config must have 'markers' attribute with channel IDs."
         )
+
+        self.ds_markers = panels_config["markers"]
 
         self.channel_ids = {
             dataset: torch.tensor(
@@ -75,57 +103,54 @@ class DatasetFromTIFF(Dataset):
             tiffs = glob(os.path.join(img_path, dataset, "imgs", f"*.{file_extension}"))
             self.imgs.extend([(tiff, dataset) for tiff in tiffs])
 
-        if use_global_clip_limits:
-            self.clip_limits = {}
-        else:
-            self.clip_limits = panels_config.get("clip_limits", {})
-        self.global_upper_bound = global_upper_bound
+        ds_percentiles = panels_config.get("clip_limits", None)
+        ds_marker_stats = panels_config.get("marker_stats", None)
 
-        self.transform = transform
-        self.use_denoising = use_median_denoising
-        self.use_butterworth = use_butterworth_filter
-        self.use_minmax_normalization = use_minmax_normalization
-        self.use_clip_normalization = use_clip_normalization
-        self.use_preprocessing = use_preprocessing
+        self.preprocess = (
+            Preprocessing(preprocessing_func, **preprocessing_kwargs)
+            if preprocessing_func
+            else Identity()
+        )
+        self.denoise = (
+            Denoising(denoising_func, **denoising_kwargs)
+            if denoising_func
+            else Identity()
+        )
+        self.scale = (
+            Scaling(
+                scaling_func, ds_percentiles, global_scaling_bound, **scaling_kwargs
+            )
+            if scaling_func
+            else Identity()
+        )
+        self.norm = (
+            Normalization(normalization_func, ds_marker_stats, **normalization_kwargs)
+            if normalization_func
+            else Identity()
+        )
+        self.outlier_pruning = (
+            OutlierPruning(outlier_pruning_func, **outlier_pruning_kwargs)
+            if outlier_pruning_func
+            else Identity()
+        )
+        self.transform = TorchvisionTransform(transform) if transform else Identity()
+
+        self.pipeline = Pipeline(
+            transforms={
+                "preprocessing": self.preprocess,
+                "denoising": self.denoise,
+                "scaling": self.scale,
+                "normalization": self.norm,
+                "transform": self.transform,
+                "outlier_pruning": self.outlier_pruning,
+            },
+            operation_order=operation_order,
+        )
+
         self.file_extension = file_extension
         self.read_file_func = (
             tifffile.imread if self.file_extension == "tiff" else np.load
         )
-
-    @staticmethod
-    def preprocess(img):
-        return np.arcsinh(img / 5.0)
-
-    @staticmethod
-    def denoise(img):
-        denoised_channels = [
-            medianBlur(img[i].astype("float32"), 3) for i in range(img.shape[0])
-        ]
-        return np.stack(denoised_channels)
-
-    @staticmethod
-    def butterworth(img):
-        filtered_channels = [
-            filters.butterworth(img[i], cutoff_frequency_ratio=0.2, high_pass=False)
-            for i in range(img.shape[0])
-        ]
-        return np.stack(filtered_channels)
-
-    @staticmethod
-    def norm_minmax(img):
-        min_val = np.min(img, axis=(1, 2), keepdims=True)
-        max_val = np.max(img, axis=(1, 2), keepdims=True)
-        scaled_img = np.where(
-            max_val == min_val, img, (img - min_val) / (max_val - min_val + 1e-8)
-        )
-        scaled_img = np.clip(scaled_img, 0, 1)
-        return scaled_img
-
-    def norm_clip(self, img, dataset):
-        """Normalize image channels to [0, 1] range using clipping."""
-        upper_bound = self.clip_limits.get(dataset, self.global_upper_bound)
-        img = np.clip(img, 0, upper_bound) / upper_bound
-        return img
 
     def __len__(self):
         return len(self.imgs)
@@ -133,25 +158,10 @@ class DatasetFromTIFF(Dataset):
     def __getitem__(self, idx):
         img_path, dataset = self.imgs[idx]
         channel_ids = self.channel_ids[dataset]
+        marker_names = self.ds_markers[dataset]
 
         img = self.read_file_func(img_path)
-        if self.use_preprocessing:
-            img = self.preprocess(img)
-
-        if self.transform:
-            img = self.transform(torch.tensor(img)).numpy()
-
-        if self.use_butterworth:
-            img = self.butterworth(img)
-
-        if self.use_denoising:
-            img = self.denoise(img)
-
-        if self.use_clip_normalization:
-            img = self.norm_clip(img, dataset)
-
-        elif self.use_minmax_normalization:
-            img = self.norm_minmax(img)
+        img = self.pipeline(img, dataset=dataset, marker_names=marker_names)
 
         img = torch.tensor(img)
 
@@ -211,17 +221,3 @@ class PanelBatchSampler(Sampler):
     def __len__(self):
         """Return number of batches per epoch."""
         return len(self.epoch_batches)
-
-
-class TestCrop:
-    def __init__(self, size: int):
-        self.size = size
-
-    def __call__(self, img: torch.Tensor) -> torch.Tensor:
-        # Crop the image and mask
-        h, w = img.shape[-2], img.shape[-1]
-        top = (h - self.size) // 2
-        left = (w - self.size) // 2
-        img = crop(img, top, left, self.size, self.size)
-
-        return img

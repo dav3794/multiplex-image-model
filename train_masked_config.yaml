@@ -29,6 +29,18 @@ input_image_size: [128, 128]
 num_workers: 8
 batch_size: 8
 
+data_config:
+  preprocessing_func: arcsinh
+  scaling_func: percentile
+  denoising_func: butterworth
+  normalization_func: null
+  operation_order: [transform, preprocessing, denoising, scaling]
+  file_extension: npy
+  preprocessing_kwargs: {}
+  denoising_kwargs: {}
+  scaling_kwargs: {}
+  normalization_kwargs: {}
+
 # Training configuration
 device: cuda
 lr: 5e-4
@@ -44,7 +56,7 @@ mask_patch_size: 8
 from_checkpoint: null
 checkpoints_dir: checkpoints
 save_checkpoint_freq: 5
-beta: 1.0
+beta: 0.5
 
 # Comet.ml logging configuration
 tags: [...]

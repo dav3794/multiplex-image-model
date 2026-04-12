@@ -19,7 +19,7 @@ from torchvision.transforms import (
 from torchvision.transforms.functional import InterpolationMode
 from tqdm import tqdm
 
-from multiplex_model.data import DatasetFromTIFF, PanelBatchSampler, TestCrop
+from multiplex_model.data import MultiplexDataset, PanelBatchSampler, TestCrop
 from multiplex_model.losses import RankMe, beta_nll_loss, nll_loss
 from multiplex_model.modules import MultiplexAutoencoder
 from multiplex_model.utils import (
@@ -135,6 +135,8 @@ def train_masked(
             "scheduler_state_dict": scheduler.state_dict(),
             "epoch": epoch,
         }
+        if hasattr(model, "get_architecture_config"):
+            checkpoint["model_config"] = model.get_architecture_config()
         if (epoch + 1) % save_checkpoint_every == 0:
             torch.save(
                 checkpoint,
@@ -147,6 +149,8 @@ def train_masked(
     checkpoint = {
         "model_state_dict": model.state_dict(),
     }
+    if hasattr(model, "get_architecture_config"):
+        checkpoint["model_config"] = model.get_architecture_config()
     torch.save(checkpoint, final_model_path)
 
 
@@ -296,8 +300,8 @@ if __name__ == "__main__":
     BATCH_SIZE = config.batch_size
     NUM_WORKERS = config.num_workers
 
-    PANEL_CONFIG = YAML().load(open(config.panel_config))
-    TOKENIZER = YAML().load(open(config.tokenizer_config))
+    PANEL_CONFIG = config.panel_config
+    TOKENIZER = config.tokenizer_config
     INV_TOKENIZER = {v: k for k, v in TOKENIZER.items()}
 
     train_transform = Compose(
@@ -310,30 +314,22 @@ if __name__ == "__main__":
 
     test_transform = TestCrop(SIZE[0])
 
-    train_dataset = DatasetFromTIFF(
+    dataset_kwargs = config.data_config.model_dump()
+
+    train_dataset = MultiplexDataset(
         panels_config=PANEL_CONFIG,
         split="train",
         marker_tokenizer=TOKENIZER,
         transform=train_transform,
-        use_preprocessing=False,  # saved data is already preprocessed
-        use_median_denoising=False,
-        use_butterworth_filter=True,
-        use_minmax_normalization=False,
-        use_clip_normalization=True,
-        file_extension="npy",
+        **dataset_kwargs,
     )
 
-    test_dataset = DatasetFromTIFF(
+    test_dataset = MultiplexDataset(
         panels_config=PANEL_CONFIG,
         split="test",
         marker_tokenizer=TOKENIZER,
         transform=test_transform,
-        use_preprocessing=False,  # saved data is already preprocessed
-        use_median_denoising=False,
-        use_butterworth_filter=True,
-        use_minmax_normalization=False,
-        use_clip_normalization=True,
-        file_extension="npy",
+        **dataset_kwargs,
     )
 
     train_batch_sampler = PanelBatchSampler(train_dataset, BATCH_SIZE)
@@ -358,11 +354,25 @@ if __name__ == "__main__":
 
     # Build model configuration
     num_channels = len(TOKENIZER)
-    model = MultiplexAutoencoder(
-        num_channels=num_channels,
-        encoder_config=config.encoder_config.model_dump(),
-        decoder_config=config.decoder_config.model_dump(),
-    ).to(device)
+    model_config = {
+        "num_channels": num_channels,
+        "encoder_config": config.encoder_config.model_dump(),
+        "decoder_config": config.decoder_config.model_dump(),
+    }
+
+    # Load checkpoint if specified
+    start_epoch = 0
+    checkpoint = None
+    if config.resolve_checkpoint():
+        print(f"Loading model from checkpoint: {config.from_checkpoint}")
+        checkpoint = torch.load(config.from_checkpoint, map_location=device)
+        model = MultiplexAutoencoder.load_from_checkpoint(
+            checkpoint,
+            model_config=model_config,
+        ).to(device)
+        start_epoch = checkpoint.get("epoch", -1) + 1
+    else:
+        model = MultiplexAutoencoder(**model_config).to(device)
 
     # Setup optimizer and scheduler
     total_steps = (
@@ -383,19 +393,15 @@ if __name__ == "__main__":
         type="cosine",
     )
 
+    if checkpoint is not None:
+        if "optimizer_state_dict" in checkpoint:
+            optimizer.load_state_dict(checkpoint["optimizer_state_dict"])
+        if "scheduler_state_dict" in checkpoint:
+            scheduler.load_state_dict(checkpoint["scheduler_state_dict"])
+
     # Initialize Comet.ml experiment
     comet_config = config.model_dump()
     init_experiment(comet_config)
-
-    # Load checkpoint if specified
-    start_epoch = 0
-    if config.resolve_checkpoint():
-        print(f"Loading model from checkpoint: {config.from_checkpoint}")
-        checkpoint = torch.load(config.from_checkpoint, map_location=device)
-        model.load_state_dict(checkpoint["model_state_dict"])
-        optimizer.load_state_dict(checkpoint["optimizer_state_dict"])
-        scheduler.load_state_dict(checkpoint["scheduler_state_dict"])
-        start_epoch = checkpoint["epoch"] + 1
 
     # Train the model
     train_masked(

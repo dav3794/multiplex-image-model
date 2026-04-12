@@ -1,9 +1,11 @@
 """Configuration models and utilities using Pydantic for validation."""
 
+import csv
 import os
 from typing import Any
 
 from pydantic import BaseModel, ConfigDict, Field, field_validator
+from ruamel.yaml import YAML
 
 from .train_logging import get_run_name
 
@@ -75,6 +77,14 @@ class EncoderConfig(BaseModel):
         default=True,
         description="Whether to apply LayerNorm to the latent representation",
     )
+    use_mask_token: bool = Field(
+        default=False,
+        description="Whether to replace masked pixels with a learnable token",
+    )
+    mask_token_init: float = Field(
+        default=0.0,
+        description="Initial value for the mask token",
+    )
     encoder_type: str | ModuleConfig | None = Field(
         default="convnext",
         description=(
@@ -86,8 +96,8 @@ class EncoderConfig(BaseModel):
     @field_validator("ma_layers_blocks", "pm_layers_blocks")
     @classmethod
     def validate_blocks(cls, v: list[int]) -> list[int]:
-        if any(x <= 0 for x in v):
-            raise ValueError("All block counts must be positive")
+        if any(x < 0 for x in v):
+            raise ValueError("All block counts must be non-negative")
         return v
 
     @field_validator("ma_embedding_dims", "pm_embedding_dims")
@@ -167,6 +177,99 @@ class DecoderConfig(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
 
+class DataConfig(BaseModel):
+    """Configuration for MultiplexDataset."""
+
+    preprocessing_func: str | None = Field(
+        default="arcsinh",
+        description=(
+            "Preprocessing function to use (e.g., 'arcsinh', 'log1p'); set to null to disable"
+        ),
+    )
+    scaling_func: str | None = Field(
+        default="percentile",
+        description=(
+            "Scaling function to use (e.g., 'minmax', 'percentile', 'global_clip'); set to null to disable"
+        ),
+    )
+    global_scaling_bound: float = Field(
+        default=5.0,
+        gt=0,
+        description="Global upper bound for scaling when using 'global_clip'",
+    )
+    denoising_func: str | None = Field(
+        default="butterworth",
+        description=(
+            "Denoising function to use (e.g., 'median', 'gaussian', 'butterworth'); set to null to disable"
+        ),
+    )
+    normalization_func: str | None = Field(
+        default=None,
+        description=(
+            "Normalization function to use (e.g., 'zscore_ds'); set to null to disable"
+        ),
+    )
+    operation_order: list[str] = Field(
+        default_factory=lambda: [
+            "transform",
+            "preprocessing",
+            "denoising",
+            "scaling",
+            "normalization",
+        ],
+        description="Order of dataset operations applied to multiplex images",
+    )
+    file_extension: str = Field(
+        default="tiff",
+        description="Image file extension for dataset inputs (e.g., 'tiff', 'npy')",
+    )
+    preprocessing_kwargs: dict[str, Any] = Field(
+        default_factory=dict,
+        description="Extra keyword arguments for preprocessing",
+    )
+    denoising_kwargs: dict[str, Any] = Field(
+        default_factory=dict,
+        description="Extra keyword arguments for denoising",
+    )
+    scaling_kwargs: dict[str, Any] = Field(
+        default_factory=dict,
+        description="Extra keyword arguments for scaling",
+    )
+    normalization_kwargs: dict[str, Any] = Field(
+        default_factory=dict,
+        description="Extra keyword arguments for normalization",
+    )
+
+    model_config = ConfigDict(extra="forbid")
+
+
+def load_normalization_stats_csv(path: str) -> dict[str, dict[str, list[float]]]:
+    csv_path = os.path.expanduser(path)
+    if not os.path.exists(csv_path):
+        raise ValueError(f"Normalization stats CSV not found: {csv_path}")
+
+    with open(csv_path, "r", newline="") as handle:
+        reader = csv.DictReader(handle)
+        fieldnames = set(reader.fieldnames or [])
+        required = {"dataset", "marker", "mean", "std"}
+        if not required.issubset(fieldnames):
+            missing = required - fieldnames
+            raise ValueError(
+                "Normalization stats CSV is missing columns: "
+                f"{', '.join(sorted(missing))}"
+            )
+
+        stats: dict[str, dict[str, list[float]]] = {}
+        for row in reader:
+            dataset = row["dataset"]
+            marker = row["marker"]
+            mean = float(row["mean"])
+            std = float(row["std"])
+            stats.setdefault(dataset, {})[marker] = [mean, std]
+
+    return stats   
+
+
 class TrainingConfig(BaseModel):
     """Pydantic model for training configuration with validation."""
 
@@ -180,10 +283,18 @@ class TrainingConfig(BaseModel):
     batch_size: int = Field(..., gt=0, description="Batch size for training")
     num_workers: int = Field(..., ge=0, description="Number of data loading workers")
 
+    # Dataset parameters
+    data_config: DataConfig = Field(
+        default_factory=DataConfig,
+        description="Dataset configuration for MultiplexDataset",
+    )
+
     # Config file paths
-    panel_config: str = Field(..., description="Path to panel configuration file")
-    tokenizer_config: str = Field(
-        ..., description="Path to tokenizer configuration file"
+    panel_config: dict[str, Any] | str = Field(
+        ..., description="Panel configuration data or path to panel configuration file"
+    )
+    tokenizer_config: dict[str, Any] | str = Field(
+        ..., description="Tokenizer configuration data or path to tokenizer configuration file"
     )
 
     # Training parameters
@@ -274,5 +385,56 @@ class TrainingConfig(BaseModel):
                 return False
 
         return True
+
+
+    @field_validator("panel_config", mode="before")
+    @classmethod
+    def validate_panel_config(cls, v):
+        """Load panel config from YAML file and resolve marker stats if needed."""
+
+        if isinstance(v, str):
+            config_path = os.path.expanduser(v)
+            if not os.path.exists(config_path):
+                raise ValueError(f"Panel config not found: {config_path}")
+
+            yaml = YAML(typ="safe")
+            with open(config_path, "r") as handle:
+                panel_config = yaml.load(handle)
+
+            panel_config_dir = os.path.dirname(os.path.abspath(config_path))
+        
+        else:
+            panel_config = v
+            panel_config_dir = ""
+
+        marker_stats = panel_config.get("marker_stats")
+        if isinstance(marker_stats, str):
+            marker_stats_path = os.path.expanduser(marker_stats)
+            if not os.path.isabs(marker_stats_path):
+                marker_stats_path = os.path.join(panel_config_dir, marker_stats_path)
+            resolved_stats = load_normalization_stats_csv(marker_stats_path)
+            panel_config = panel_config.copy()
+            panel_config["marker_stats"] = resolved_stats
+
+        return panel_config
+
+    @field_validator("tokenizer_config", mode="before")
+    @classmethod
+    def validate_tokenizer_config(cls, v):
+        """Load tokenizer config from YAML file."""
+
+        if isinstance(v, str):
+            config_path = os.path.expanduser(v)
+            if not os.path.exists(config_path):
+                raise ValueError(f"Tokenizer config not found: {config_path}")
+
+            yaml = YAML(typ="safe")
+            with open(config_path, "r") as handle:
+                tokenizer_config = yaml.load(handle)
+        else:
+            tokenizer_config = v
+
+        return tokenizer_config
+
 
     model_config = ConfigDict(extra="forbid")  # Raise error on unknown fields
