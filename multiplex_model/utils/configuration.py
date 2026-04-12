@@ -405,10 +405,14 @@ class TrainingConfig(BaseModel):
             raise ValueError(
                 "panel_config must be a path to a YAML file containing the panel config"
             )
-        
+
+        panel_config_dir = os.path.dirname(os.path.abspath(config_path))
         marker_stats = panel_config.get("marker_stats")
         if isinstance(marker_stats, str):
-            resolved_stats = load_normalization_stats_csv(marker_stats)
+            marker_stats_path = os.path.expanduser(marker_stats)
+            if not os.path.isabs(marker_stats_path):
+                marker_stats_path = os.path.join(panel_config_dir, marker_stats_path)
+            resolved_stats = load_normalization_stats_csv(marker_stats_path)
             panel_config = panel_config.copy()
             panel_config["marker_stats"] = resolved_stats
 
