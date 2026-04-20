@@ -251,6 +251,13 @@ class TrainingConfig(BaseModel):
     marker_jitter: float = Field(
         1e-2, ge=0, description="Jitter added to marker covariance K_C for numerical stability"
     )
+    use_multiplication: bool = Field(
+        False,
+        description="If true, K = D_σ·[(Kx⊗Ky)⊗K_C + ε·I]·D_σ (Hadamard) instead of additive Woodbury",
+    )
+    sigma_floor: float = Field(
+        1e-3, gt=0, description="Lower clamp on σ when use_multiplication=True (keeps D_σ invertible)"
+    )
 
     # Model architecture
     encoder_config: EncoderConfig = Field(
