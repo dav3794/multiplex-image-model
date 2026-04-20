@@ -419,6 +419,8 @@ class KroneckerMarkerCovariance(nn.Module):
         marker_jitter: float = 1e-2,
         spatial_matern_kernel_nu: float = 1.5,
         spatial_matern_kernel_length_scale: float = 5.0,
+        use_multiplication: bool = False,
+        sigma_floor: float = 1e-3,
         device=None,
     ):
         super().__init__()
@@ -429,6 +431,8 @@ class KroneckerMarkerCovariance(nn.Module):
         self.marker_jitter = marker_jitter
         self.grid_size = grid_size
         self.N = grid_size * grid_size
+        self.use_multiplication = use_multiplication
+        self.sigma_floor = sigma_floor
 
         # --- Spatial eigendecomposition (identical to KroneckerPlusSpatialCovariance) ---
         x1d = torch.linspace(0, 1, grid_size, device=device).unsqueeze(-1)
@@ -545,9 +549,16 @@ class KroneckerMarkerCovariance(nn.Module):
         """
         Joint log p(targets | mu, K) over all N pixels and C markers.
 
-        K = (K_x ⊗ K_y) ⊗ K_C + U_block·U_blockᵀ + jitter·I
+        Plus (default):
+            K = (K_x ⊗ K_y) ⊗ K_C + U_block·U_blockᵀ + jitter·I
+            U_block = diag_embed(U_all).reshape(NC, C) — block-diagonal in marker axis.
+            Woodbury with rank-C update.
 
-        Uses Woodbury identity with rank-C U_block.
+        Times (use_multiplication=True):
+            K = D_σ · [(K_x ⊗ K_y) ⊗ K_C + jitter·I] · D_σ
+            where D_σ = diag(sigma_flat), sigma_flat = U_all.reshape(NC) (≥ sigma_floor).
+            Equivalent to Hadamard product [(K_x ⊗ K_y) ⊗ K_C] ⊙ (σ σᵀ) — full rank-1
+            per-pixel-per-marker modulation. No Woodbury needed.
 
         Args:
             mu_all:  [N, C] predicted means
@@ -563,30 +574,32 @@ class KroneckerMarkerCovariance(nn.Module):
 
         V_C, triple_eigs, _ = self._compute_marker_eigen(marker_embeddings)
 
-        # Error vector in spatial-major order: [pix0_ch0, pix0_ch1, ..., pixN_chC]
         e = (targets - mu_all).reshape(-1)  # [NC]
 
-        # Build U_block [NC, C] in spatial-major order: row (i*C + c) = pixel i, marker c
-        U_block = torch.diag_embed(U_all).reshape(NC, C)
+        if self.use_multiplication:
+            sigma_flat = U_all.reshape(-1).clamp(min=self.sigma_floor)  # [NC]
 
-        # log det(A)
+            z = e / sigma_flat
+            A_inv_z = self._A_solve_triple(z, V_C, triple_eigs)
+            mahal = z @ A_inv_z
+
+            log_det_K = 2.0 * sigma_flat.log().sum() + triple_eigs.log().sum()
+            return -0.5 * (mahal + log_det_K + NC * math.log(2 * math.pi))
+
+        # --- Plus variant (original) ---
+        U_block = torch.diag_embed(U_all).reshape(NC, C)
         log_det_A = triple_eigs.log().sum()
 
-        # A⁻¹ applied to error and U_block columns (C+1 RHS, batched)
         rhs = torch.cat([e.unsqueeze(-1), U_block], dim=-1)  # [NC, C+1]
-        A_inv_rhs = self._A_solve_triple(rhs, V_C, triple_eigs)  # [NC, C+1]
-        A_inv_e = A_inv_rhs[:, 0]       # [NC]
-        A_inv_U = A_inv_rhs[:, 1:]      # [NC, C]
+        A_inv_rhs = self._A_solve_triple(rhs, V_C, triple_eigs)
+        A_inv_e = A_inv_rhs[:, 0]
+        A_inv_U = A_inv_rhs[:, 1:]
 
-        # Woodbury inner matrix: M = I_C + U_blockᵀ A⁻¹ U_block  [C, C]
         M = torch.eye(C, device=e.device, dtype=e.dtype) + U_block.T @ A_inv_U
-
-        # log det(K) = log det(A) + log det(M)
         log_det_K = log_det_A + torch.linalg.slogdet(M)[1]
 
-        # K⁻¹ e = A⁻¹e - A⁻¹U M⁻¹ Uᵀ A⁻¹e
-        Ut_Ainv_e = U_block.T @ A_inv_e  # [C]
-        correction = A_inv_U @ torch.linalg.solve(M, Ut_Ainv_e)  # [NC]
+        Ut_Ainv_e = U_block.T @ A_inv_e
+        correction = A_inv_U @ torch.linalg.solve(M, Ut_Ainv_e)
         K_inv_e = A_inv_e - correction
 
         mahal = e @ K_inv_e

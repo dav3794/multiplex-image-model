@@ -138,6 +138,55 @@ def test_log_prob_joint_matches_dense():
     torch.testing.assert_close(log_prob, expected, atol=1e-3, rtol=1e-3)
 
 
+def test_log_prob_joint_multiplication_matches_dense():
+    """Times variant: K = D_σ · [A] · D_σ matches direct dense log-prob."""
+    from multiplex_model.modules.gp_covariance import KroneckerMarkerCovariance
+
+    torch.manual_seed(42)
+    n = 4
+    C = 3
+    N = n * n
+    NC = N * C
+
+    mod = KroneckerMarkerCovariance(
+        grid_size=n,
+        marker_embed_dim=3,
+        hyperkernel_model_dim=8,
+        kernel_jitter=1e-2,
+        marker_jitter=1e-2,
+        spatial_matern_kernel_length_scale=5.0,
+        use_multiplication=True,
+        sigma_floor=1e-6,
+        device="cpu",
+    )
+
+    marker_emb = torch.randn(C, 8)
+    mu_all = torch.randn(N, C)
+    U_all = torch.abs(torch.randn(N, C)) * 0.1 + 0.01
+    targets = torch.randn(N, C)
+
+    log_prob = mod.log_prob_joint(mu_all, U_all, targets, marker_emb)
+
+    # Dense ground truth: K_times = D_σ · [(Kx ⊗ Ky) ⊗ K_C + ε·I] · D_σ
+    E = torch.nn.functional.normalize(mod.embedding_projection(marker_emb), p=2, dim=1)
+    K_C = E @ E.T + mod.marker_jitter * torch.eye(C)
+    K1d = mod.V @ torch.diag(mod.lam) @ mod.V.T
+    K_spatial = torch.kron(K1d, K1d)
+    A_dense = torch.kron(K_spatial, K_C) + mod.kernel_jitter * torch.eye(NC)
+
+    sigma_flat = U_all.reshape(-1)  # [NC] spatial-major: (pix, marker)
+    D_sigma = torch.diag(sigma_flat)
+    K_dense = D_sigma @ A_dense @ D_sigma
+
+    e = (targets - mu_all).reshape(-1)
+    K_inv_e = torch.linalg.solve(K_dense, e)
+    mahal = e @ K_inv_e
+    log_det = torch.linalg.slogdet(K_dense)[1]
+    expected = -0.5 * (mahal + log_det + NC * math.log(2 * math.pi))
+
+    torch.testing.assert_close(log_prob, expected, atol=1e-3, rtol=1e-3)
+
+
 def test_compute_marker_correlation_shape_and_diagonal():
     """compute_marker_correlation returns CxC with ones on diagonal."""
     mod = _build_module(grid_size=4, marker_embed_dim=3, hyperkernel_model_dim=8)

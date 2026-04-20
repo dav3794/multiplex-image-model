@@ -579,6 +579,8 @@ if __name__ == "__main__":
     use_marker_covariance = getattr(config, "use_marker_covariance", False)
     marker_embed_dim      = getattr(config, "marker_embed_dim", 32)
     marker_jitter         = getattr(config, "marker_jitter", 1e-2)
+    use_multiplication    = getattr(config, "use_multiplication", False)
+    sigma_floor           = getattr(config, "sigma_floor", 1e-3)
 
     print("\nGP Loss Configuration:")
     print(f"  Use GP Loss:         {use_gp_loss}")
@@ -591,7 +593,9 @@ if __name__ == "__main__":
     print(f"  Learn Lengthscale:   {gp_learn_lengthscale}  (ignored for Kronecker)")
     print(f"  Use Marker Cov:      {use_marker_covariance}")
     print(f"  Marker Embed Dim:    {marker_embed_dim}")
-    print(f"  Marker Jitter:       {marker_jitter}\n")
+    print(f"  Marker Jitter:       {marker_jitter}")
+    print(f"  Use Multiplication:  {use_multiplication}")
+    print(f"  Sigma Floor:         {sigma_floor}\n")
 
     # Initialize GP covariance module
     gp_covariance_module = None
@@ -622,6 +626,8 @@ if __name__ == "__main__":
                 kernel_jitter=gp_kernel_jitter,
                 marker_jitter=marker_jitter,
                 spatial_matern_kernel_length_scale=gp_lengthscale,
+                use_multiplication=use_multiplication,
+                sigma_floor=sigma_floor,
                 device=device,
             )
             gp_covariance_module = gp_covariance_module.to(device)
@@ -714,6 +720,8 @@ if __name__ == "__main__":
         "use_marker_covariance": use_marker_covariance,
         "marker_embed_dim":      marker_embed_dim,
         "marker_jitter":         marker_jitter,
+        "use_multiplication":    use_multiplication,
+        "sigma_floor":           sigma_floor,
     })
     init_experiment(comet_config)
 
