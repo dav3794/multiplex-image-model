@@ -166,8 +166,8 @@ class MultiplexImageEncoder(nn.Module):
             pm_layers_blocks (List[int]): Number of blocks in each pan-marker layer.
             pm_embedding_dims (List[int]): Embedding dimensions for each pan-marker layer.
             use_latent_norm (bool, optional): Whether to apply LayerNorm to the latent representation. Defaults to False.
-            use_mask_token (bool, optional): Whether to use a learnable mask token for spatially masked pixels. Defaults to False.
-            mask_token_init (float, optional): Initial value for the learnable mask token. Defaults to 0.0.
+            use_mask_token (bool, optional): Whether to replace masked pixels with a learnable token. Defaults to False.
+            mask_token_init (float, optional): Initial value for the mask token. Defaults to 0.0.
             encoder_type (Union[str, Type[Encoder], Dict], optional): Type of encoder to use.
                 Can be a string (registry name), Encoder class, or config dict with 'type' and 'module_parameters'.
                 For ConvNeXtEncoder, module_parameters can include 'block_parameters' dict with ConvNextBlock parameters
@@ -241,8 +241,7 @@ class MultiplexImageEncoder(nn.Module):
         Args:
             x (torch.Tensor): Multiplex images batch tensor with shape [B, C, H, W]
             encoded_indices (torch.Tensor): Indices of the markers in channels tensor with shape [B, C].
-            spatial_mask (torch.Tensor | None, optional): Binary mask indicating spatially masked pixels [B, C, H, W].
-                When provided and use_mask_token is True, masked pixels are replaced with the mask token. Defaults to None.
+            spatial_mask (torch.Tensor, optional): Boolean mask for masked pixels [B, C, H, W].
             return_features (bool, optional): If True, returns the features after each block. Defaults to False.
 
         Returns:
@@ -390,6 +389,7 @@ class MultiplexAutoencoder(nn.Module):
             "encoder_config": copy.deepcopy(encoder_config),
             "decoder_config": copy.deepcopy(decoder_config),
         }
+
         self.latent_dim = encoder_config["pm_embedding_dims"][-1]
         self.num_channels = num_channels
 
@@ -412,22 +412,25 @@ class MultiplexAutoencoder(nn.Module):
         )
 
     def get_architecture_config(self, by_alias: bool = False) -> dict:
-        """Returns the stored architecture configuration.
+        """Return the model architecture configuration.
 
         Args:
-            by_alias (bool, optional): If True, renames keys to use aliases for compatibility.
-                Defaults to False.
+            by_alias: If True, uses config aliases (e.g., 'hyperkernel').
 
         Returns:
-            dict: A deep copy of the architecture configuration.
+            dict: Architecture configuration for rebuilding the model.
         """
         config = copy.deepcopy(self._architecture_config)
         if by_alias:
             config = config.copy()
             config["encoder"] = config.pop("encoder_config")
             config["decoder"] = config.pop("decoder_config")
-            config["encoder"]["hyperkernel"] = config["encoder"].pop("hyperkernel_config")
-            config["decoder"]["hyperkernel"] = config["decoder"].pop("hyperkernel_config")
+            config["encoder"]["hyperkernel"] = config["encoder"].pop(
+                "hyperkernel_config"
+            )
+            config["decoder"]["hyperkernel"] = config["decoder"].pop(
+                "hyperkernel_config"
+            )
         return config
 
     @classmethod
@@ -438,22 +441,16 @@ class MultiplexAutoencoder(nn.Module):
         model_config: dict | None = None,
         strict: bool = True,
     ) -> "MultiplexAutoencoder":
-        """Load a MultiplexAutoencoder from a checkpoint.
+        """Create a model and load weights from a checkpoint.
 
         Args:
-            checkpoint (str | dict): Path to checkpoint file or checkpoint dict.
-            map_location (str | torch.device | None, optional): Location to map checkpoint to.
-                Defaults to None.
-            model_config (dict | None, optional): Model configuration to use if checkpoint
-                does not contain 'model_config'. Defaults to None.
-            strict (bool, optional): Whether to strictly enforce that all state_dict keys
-                match the model. Defaults to True.
+            checkpoint: Path to checkpoint file or loaded checkpoint dict.
+            map_location: Optional map_location passed to torch.load when checkpoint is a path.
+            model_config: Model config to use if checkpoint lacks 'model_config'.
+            strict: Whether to strictly enforce that the keys in state_dict match the model.
 
         Returns:
-            MultiplexAutoencoder: Loaded model with state_dict applied.
-
-        Raises:
-            ValueError: If checkpoint and model_config do not provide configuration.
+            MultiplexAutoencoder: Model with weights loaded from checkpoint.
         """
         if isinstance(checkpoint, dict):
             checkpoint_data = checkpoint
@@ -482,9 +479,7 @@ class MultiplexAutoencoder(nn.Module):
         Args:
             x (torch.Tensor): Input images tensor with shape (B, C, H, W).
             encoded_indices (torch.Tensor): Indices of the markers in channels.
-            spatial_mask (torch.Tensor | None, optional): Binary mask indicating spatially masked pixels [B, C, H, W].
-                When provided and the encoder has use_mask_token enabled, masked pixels are replaced with the mask token.
-                Defaults to None.
+            spatial_mask (torch.Tensor, optional): Boolean mask for masked pixels [B, C, H, W].
             return_features (bool, optional): If True, returns the features after encoding. Defaults to False.
 
         Returns:
@@ -535,16 +530,16 @@ class MultiplexAutoencoder(nn.Module):
                 for encoding.
             decoded_indices (torch.Tensor): Indices of the markers in channels
                 for decoding.
-            spatial_mask (torch.Tensor | None, optional): Binary mask indicating spatially masked pixels [B, C, H, W].
-                When provided and the encoder has use_mask_token enabled, masked pixels are replaced with the mask token.
-                Defaults to None.
-            return_features (bool, optional): If True, returns the features after encoding. Defaults to False.
+            spatial_mask (torch.Tensor, optional): Boolean mask for masked pixels [B, C, H, W].
 
         Returns:
             dict: A dictionary containing the reconstructed images tensor (under 'output') and optionally the features.
         """
         encoding_output = self.encode(
-            x, encoded_indices, spatial_mask=spatial_mask, return_features=return_features
+            x,
+            encoded_indices,
+            spatial_mask=spatial_mask,
+            return_features=return_features,
         )
         x = encoding_output["output"]
         x = self.decode(x, decoded_indices)

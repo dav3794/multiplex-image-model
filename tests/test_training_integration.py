@@ -364,3 +364,123 @@ def test_encoder_forward_applies_mask_token_to_masked_pixels():
     enc_indices = torch.arange(C).unsqueeze(0).expand(B, -1)
     out = enc(x, enc_indices, spatial_mask=spatial_mask)
     assert "output" in out
+
+
+# ---------------------------------------------------------------------------
+# Test 7: MultiplexAutoencoder spatial_mask and architecture config
+# ---------------------------------------------------------------------------
+
+
+def test_autoencoder_encode_accepts_spatial_mask():
+    import torch
+    from multiplex_model.modules import MultiplexAutoencoder
+
+    B, C, H, W = 2, 4, 8, 8
+    model = MultiplexAutoencoder(
+        num_channels=C,
+        encoder_config={
+            "ma_layers_blocks": [1],
+            "ma_embedding_dims": [8],
+            "pm_layers_blocks": [1],
+            "pm_embedding_dims": [16],
+            "hyperkernel_config": {"kernel_size": 1, "padding": 0, "stride": 1, "use_bias": True},
+        },
+        decoder_config={
+            "decoded_embed_dim": 16,
+            "num_blocks": 1,
+            "hyperkernel_config": {"kernel_size": 1, "padding": 0, "stride": 1, "use_bias": True},
+        },
+    )
+    x = torch.rand(B, C, H, W)
+    enc_ids = torch.arange(C).unsqueeze(0).expand(B, -1)
+    spatial_mask = torch.zeros(B, C, H, W, dtype=torch.bool)
+    out = model.encode(x, enc_ids, spatial_mask=spatial_mask)
+    assert "output" in out
+
+
+def test_autoencoder_forward_accepts_spatial_mask():
+    import torch
+    from multiplex_model.modules import MultiplexAutoencoder
+
+    B, C, H, W = 2, 4, 8, 8
+    model = MultiplexAutoencoder(
+        num_channels=C,
+        encoder_config={
+            "ma_layers_blocks": [1],
+            "ma_embedding_dims": [8],
+            "pm_layers_blocks": [1],
+            "pm_embedding_dims": [16],
+            "hyperkernel_config": {"kernel_size": 1, "padding": 0, "stride": 1, "use_bias": True},
+        },
+        decoder_config={
+            "decoded_embed_dim": 16,
+            "num_blocks": 1,
+            "hyperkernel_config": {"kernel_size": 1, "padding": 0, "stride": 1, "use_bias": True},
+        },
+    )
+    x = torch.rand(B, C, H, W)
+    enc_ids = torch.arange(C).unsqueeze(0).expand(B, -1)
+    dec_ids = enc_ids
+    spatial_mask = torch.zeros(B, C, H, W, dtype=torch.bool)
+    out = model(x, enc_ids, dec_ids, spatial_mask=spatial_mask)
+    assert "output" in out
+
+
+def test_autoencoder_get_architecture_config_roundtrip():
+    import torch
+    from multiplex_model.modules import MultiplexAutoencoder
+
+    C = 4
+    model = MultiplexAutoencoder(
+        num_channels=C,
+        encoder_config={
+            "ma_layers_blocks": [1],
+            "ma_embedding_dims": [8],
+            "pm_layers_blocks": [1],
+            "pm_embedding_dims": [16],
+            "hyperkernel_config": {"kernel_size": 1, "padding": 0, "stride": 1, "use_bias": True},
+        },
+        decoder_config={
+            "decoded_embed_dim": 16,
+            "num_blocks": 1,
+            "hyperkernel_config": {"kernel_size": 1, "padding": 0, "stride": 1, "use_bias": True},
+        },
+    )
+    cfg = model.get_architecture_config()
+    assert cfg["num_channels"] == C
+    assert "encoder_config" in cfg
+    assert "decoder_config" in cfg
+
+    model2 = MultiplexAutoencoder(**cfg)
+    assert model2.num_channels == C
+
+
+def test_autoencoder_load_from_checkpoint_roundtrip():
+    import torch
+    from multiplex_model.modules import MultiplexAutoencoder
+
+    C = 4
+    model = MultiplexAutoencoder(
+        num_channels=C,
+        encoder_config={
+            "ma_layers_blocks": [1],
+            "ma_embedding_dims": [8],
+            "pm_layers_blocks": [1],
+            "pm_embedding_dims": [16],
+            "hyperkernel_config": {"kernel_size": 1, "padding": 0, "stride": 1, "use_bias": True},
+        },
+        decoder_config={
+            "decoded_embed_dim": 16,
+            "num_blocks": 1,
+            "hyperkernel_config": {"kernel_size": 1, "padding": 0, "stride": 1, "use_bias": True},
+        },
+    )
+    fake_checkpoint = {
+        "model_state_dict": model.state_dict(),
+        "model_config": model.get_architecture_config(),
+    }
+    loaded = MultiplexAutoencoder.load_from_checkpoint(fake_checkpoint)
+    assert loaded.num_channels == C
+    for (k1, v1), (k2, v2) in zip(model.state_dict().items(), loaded.state_dict().items()):
+        assert k1 == k2
+        assert v1.allclose(v2)
