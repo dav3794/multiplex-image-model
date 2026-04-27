@@ -1,4 +1,3 @@
-import copy
 from typing import Literal
 
 import torch
