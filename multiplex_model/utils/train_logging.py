@@ -317,6 +317,7 @@ def log_training_metrics(
     step: int | None = None,
     standard_nll: float | None = None,
     gp_nll: float | None = None,
+    mask_token: float | None = None,
 ) -> None:
     """Log training metrics to Comet.ml.
 
@@ -330,6 +331,7 @@ def log_training_metrics(
         step (int | None): Step number for logging
         standard_nll (float | None): Standard NLL loss component (GP training)
         gp_nll (float | None): GP-based NLL loss component (GP training)
+        mask_token (float | None): Learnable mask token value
     """
     if _experiment is None:
         return
@@ -346,6 +348,8 @@ def log_training_metrics(
         metrics["train/standard_nll"] = standard_nll
     if gp_nll is not None:
         metrics["train/gp_nll"] = gp_nll
+    if mask_token is not None:
+        metrics["train/mask_token"] = mask_token
     _experiment.log_metrics(metrics, step=step)
 
 

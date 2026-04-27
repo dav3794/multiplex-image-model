@@ -484,3 +484,30 @@ def test_autoencoder_load_from_checkpoint_roundtrip():
     for (k1, v1), (k2, v2) in zip(model.state_dict().items(), loaded.state_dict().items()):
         assert k1 == k2
         assert v1.allclose(v2)
+
+
+# ---------------------------------------------------------------------------
+# Test 8: log_training_metrics mask_token parameter
+# ---------------------------------------------------------------------------
+
+
+def test_log_training_metrics_accepts_mask_token():
+    import inspect
+    from multiplex_model.utils.train_logging import log_training_metrics
+
+    sig = inspect.signature(log_training_metrics)
+    assert "mask_token" in sig.parameters, "log_training_metrics must accept mask_token kwarg"
+    param = sig.parameters["mask_token"]
+    assert param.default is None, "mask_token should default to None"
+
+    # Calling with mask_token must not raise TypeError
+    log_training_metrics(
+        loss=0.5,
+        lr=1e-3,
+        mu=0.5,
+        logvar=-1.0,
+        mae=0.1,
+        mse=0.01,
+        step=0,
+        mask_token=0.123,
+    )
