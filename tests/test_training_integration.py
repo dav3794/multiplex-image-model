@@ -261,3 +261,38 @@ def test_training_step_with_channel_and_spatial_masking():
 
     assert loss.isfinite(), f"Loss is not finite: {loss.item()}"
     assert set(loss_dict.keys()) == {"standard_nll", "gp_nll", "total_loss"}
+
+
+# ---------------------------------------------------------------------------
+# Test 5: EncoderConfig mask_token fields
+# ---------------------------------------------------------------------------
+
+
+def test_encoder_config_accepts_mask_token_fields():
+    from multiplex_model.utils.configuration import EncoderConfig
+
+    cfg = EncoderConfig(
+        ma_layers_blocks=[1],
+        ma_embedding_dims=[8],
+        pm_layers_blocks=[1],
+        pm_embedding_dims=[16],
+        hyperkernel={"kernel_size": 1, "padding": 0, "stride": 1, "use_bias": True},
+        use_mask_token=True,
+        mask_token_init=0.5,
+    )
+    assert cfg.use_mask_token is True
+    assert cfg.mask_token_init == 0.5
+
+
+def test_encoder_config_mask_token_defaults():
+    from multiplex_model.utils.configuration import EncoderConfig
+
+    cfg = EncoderConfig(
+        ma_layers_blocks=[1],
+        ma_embedding_dims=[8],
+        pm_layers_blocks=[1],
+        pm_embedding_dims=[16],
+        hyperkernel={"kernel_size": 1, "padding": 0, "stride": 1, "use_bias": True},
+    )
+    assert cfg.use_mask_token is False
+    assert cfg.mask_token_init == 0.0

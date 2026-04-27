@@ -84,6 +84,14 @@ class EncoderConfig(BaseModel):
             "Can be a string (e.g., 'convnext') or a dict with 'type' and 'module_parameters'."
         ),
     )
+    use_mask_token: bool = Field(
+        default=False,
+        description="Whether to replace spatially-masked pixels with a learnable scalar token",
+    )
+    mask_token_init: float = Field(
+        default=0.0,
+        description="Initial value for the learnable mask token",
+    )
 
     @field_validator("ma_layers_blocks", "pm_layers_blocks")
     @classmethod
