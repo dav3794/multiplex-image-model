@@ -1,3 +1,4 @@
+import copy
 from typing import Literal
 
 import torch
@@ -151,6 +152,8 @@ class MultiplexImageEncoder(nn.Module):
         pm_layers_blocks: list[int],
         pm_embedding_dims: list[int],
         use_latent_norm: bool = False,
+        use_mask_token: bool = False,
+        mask_token_init: float = 0.0,
         encoder_type: str | type[Encoder] | dict = "convnext",
     ):
         """Initialize the Multiplex Image Encoder.
@@ -163,6 +166,8 @@ class MultiplexImageEncoder(nn.Module):
             pm_layers_blocks (List[int]): Number of blocks in each pan-marker layer.
             pm_embedding_dims (List[int]): Embedding dimensions for each pan-marker layer.
             use_latent_norm (bool, optional): Whether to apply LayerNorm to the latent representation. Defaults to False.
+            use_mask_token (bool, optional): Whether to use a learnable mask token for spatially masked pixels. Defaults to False.
+            mask_token_init (float, optional): Initial value for the learnable mask token. Defaults to 0.0.
             encoder_type (Union[str, Type[Encoder], Dict], optional): Type of encoder to use.
                 Can be a string (registry name), Encoder class, or config dict with 'type' and 'module_parameters'.
                 For ConvNeXtEncoder, module_parameters can include 'block_parameters' dict with ConvNextBlock parameters
@@ -170,6 +175,11 @@ class MultiplexImageEncoder(nn.Module):
                 Defaults to "convnext".
         """
         super().__init__()
+
+        self.use_mask_token = use_mask_token
+        self.mask_token = (
+            nn.Parameter(torch.tensor(mask_token_init)) if use_mask_token else None
+        )
 
         # Resolve encoder class
         encoder_cls = resolve_encoder_class(encoder_type)
@@ -223,6 +233,7 @@ class MultiplexImageEncoder(nn.Module):
         self,
         x: torch.Tensor,
         encoded_indices: torch.Tensor,
+        spatial_mask: torch.Tensor | None = None,
         return_features: bool = False,
     ) -> dict:
         """Forward pass of the encoder.
@@ -230,6 +241,8 @@ class MultiplexImageEncoder(nn.Module):
         Args:
             x (torch.Tensor): Multiplex images batch tensor with shape [B, C, H, W]
             encoded_indices (torch.Tensor): Indices of the markers in channels tensor with shape [B, C].
+            spatial_mask (torch.Tensor | None, optional): Binary mask indicating spatially masked pixels [B, C, H, W].
+                When provided and use_mask_token is True, masked pixels are replaced with the mask token. Defaults to None.
             return_features (bool, optional): If True, returns the features after each block. Defaults to False.
 
         Returns:
@@ -239,6 +252,9 @@ class MultiplexImageEncoder(nn.Module):
         features = []
 
         B, C, H, W = x.shape
+        if self.use_mask_token and spatial_mask is not None:
+            mask_token = self.mask_token.to(dtype=x.dtype)
+            x = torch.where(spatial_mask, mask_token, x)
         x = x.reshape(B * C, 1, H, W)
         x = self.marker_agnostic_encoder(x, return_features=return_features)
         if return_features:

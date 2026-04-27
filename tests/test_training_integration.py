@@ -296,3 +296,71 @@ def test_encoder_config_mask_token_defaults():
     )
     assert cfg.use_mask_token is False
     assert cfg.mask_token_init == 0.0
+
+
+# ---------------------------------------------------------------------------
+# Test 6: Learnable mask token in MultiplexImageEncoder
+# ---------------------------------------------------------------------------
+
+
+def test_encoder_mask_token_is_none_when_disabled():
+    from multiplex_model.modules.immuvis import MultiplexImageEncoder
+
+    enc = MultiplexImageEncoder(
+        num_channels=4,
+        ma_layers_blocks=[1],
+        ma_embedding_dims=[8],
+        pm_layers_blocks=[1],
+        pm_embedding_dims=[16],
+        hyperkernel_config={"kernel_size": 1, "padding": 0, "stride": 1, "use_bias": True},
+    )
+    assert enc.mask_token is None
+
+
+def test_encoder_mask_token_is_parameter_when_enabled():
+    import torch.nn as nn
+
+    from multiplex_model.modules.immuvis import MultiplexImageEncoder
+
+    enc = MultiplexImageEncoder(
+        num_channels=4,
+        ma_layers_blocks=[1],
+        ma_embedding_dims=[8],
+        pm_layers_blocks=[1],
+        pm_embedding_dims=[16],
+        hyperkernel_config={"kernel_size": 1, "padding": 0, "stride": 1, "use_bias": True},
+        use_mask_token=True,
+        mask_token_init=0.5,
+    )
+    assert isinstance(enc.mask_token, nn.Parameter)
+    assert enc.mask_token.item() == pytest.approx(0.5)
+
+
+def test_encoder_forward_applies_mask_token_to_masked_pixels():
+    from multiplex_model.modules.immuvis import MultiplexImageEncoder
+
+    torch.manual_seed(0)
+    B, C, H, W = 1, 2, 4, 4
+    enc = MultiplexImageEncoder(
+        num_channels=C,
+        ma_layers_blocks=[1],
+        ma_embedding_dims=[8],
+        pm_layers_blocks=[1],
+        pm_embedding_dims=[16],
+        hyperkernel_config={"kernel_size": 1, "padding": 0, "stride": 1, "use_bias": True},
+        use_mask_token=True,
+        mask_token_init=99.0,
+    )
+    x = torch.zeros(B, C, H, W)
+    spatial_mask = torch.zeros(B, C, H, W, dtype=torch.bool)
+    spatial_mask[:, :, 0, 0] = True
+
+    with torch.no_grad():
+        token_val = enc.mask_token.to(dtype=x.dtype)
+        x_after = torch.where(spatial_mask, token_val, x)
+    assert x_after[:, :, 0, 0].allclose(torch.tensor(99.0))
+    assert x_after[:, :, 1, 1].allclose(torch.tensor(0.0))
+
+    enc_indices = torch.arange(C).unsqueeze(0).expand(B, -1)
+    out = enc(x, enc_indices, spatial_mask=spatial_mask)
+    assert "output" in out
