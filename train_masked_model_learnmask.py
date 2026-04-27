@@ -19,7 +19,7 @@ from torchvision.transforms import (
 from torchvision.transforms.functional import InterpolationMode
 from tqdm import tqdm
 
-from multiplex_model.data import MultiplexDataset, PanelBatchSampler, TestCrop
+from multiplex_model.data import DatasetFromTIFF, PanelBatchSampler, TestCrop
 from multiplex_model.losses import RankMe, beta_nll_loss, nll_loss
 from multiplex_model.modules import MultiplexAutoencoder
 from multiplex_model.utils import (
@@ -300,8 +300,8 @@ if __name__ == "__main__":
     BATCH_SIZE = config.batch_size
     NUM_WORKERS = config.num_workers
 
-    PANEL_CONFIG = config.panel_config
-    TOKENIZER = config.tokenizer_config
+    PANEL_CONFIG = YAML().load(open(config.panel_config))
+    TOKENIZER = YAML().load(open(config.tokenizer_config))
     INV_TOKENIZER = {v: k for k, v in TOKENIZER.items()}
 
     train_transform = Compose(
@@ -314,22 +314,30 @@ if __name__ == "__main__":
 
     test_transform = TestCrop(SIZE[0])
 
-    dataset_kwargs = config.data_config.model_dump()
-
-    train_dataset = MultiplexDataset(
+    train_dataset = DatasetFromTIFF(
         panels_config=PANEL_CONFIG,
         split="train",
         marker_tokenizer=TOKENIZER,
         transform=train_transform,
-        **dataset_kwargs,
+        use_preprocessing=False,
+        use_median_denoising=False,
+        use_butterworth_filter=True,
+        use_minmax_normalization=False,
+        use_clip_normalization=True,
+        file_extension="npy",
     )
 
-    test_dataset = MultiplexDataset(
+    test_dataset = DatasetFromTIFF(
         panels_config=PANEL_CONFIG,
         split="test",
         marker_tokenizer=TOKENIZER,
         transform=test_transform,
-        **dataset_kwargs,
+        use_preprocessing=False,
+        use_median_denoising=False,
+        use_butterworth_filter=True,
+        use_minmax_normalization=False,
+        use_clip_normalization=True,
+        file_extension="npy",
     )
 
     train_batch_sampler = PanelBatchSampler(train_dataset, BATCH_SIZE)

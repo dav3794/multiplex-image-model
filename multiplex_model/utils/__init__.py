@@ -13,6 +13,7 @@ from .configuration import (
 from .masking import (
     apply_channel_masking,
     apply_spatial_masking,
+    get_pixel_mask,
 )
 from .optim import (
     ClampWithGrad,
@@ -42,6 +43,7 @@ __all__ = [
     # Masking
     "apply_channel_masking",
     "apply_spatial_masking",
+    "get_pixel_mask",
     # Logging
     "plot_reconstructs_with_uncertainty",
     "plot_reconstructs_with_masks",

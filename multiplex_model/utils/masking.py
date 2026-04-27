@@ -107,3 +107,25 @@ def apply_spatial_masking(
     masked_img[pixel_mask] = mask_fill_value
 
     return masked_img, pixel_mask
+
+
+def get_pixel_mask(
+    img: torch.Tensor,
+    spatial_masking_ratio: float = 0.6,
+    mask_patch_size: int = 8,
+) -> torch.Tensor:
+    """Create a boolean spatial patch mask without modifying the image.
+
+    Unlike apply_spatial_masking, this only returns the boolean mask — the
+    caller decides how masked pixels are filled (e.g., via a learnable token).
+
+    Args:
+        img (torch.Tensor): Input images [B, C, H, W] — used only for shape/device.
+        spatial_masking_ratio (float): Fraction of patches to mask.
+        mask_patch_size (int): Size of each square patch to mask.
+
+    Returns:
+        torch.Tensor: Boolean mask [B, C, H, W], True where pixels are masked.
+    """
+    _, mask = apply_spatial_masking(img, spatial_masking_ratio, mask_patch_size)
+    return mask
