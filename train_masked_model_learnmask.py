@@ -1,5 +1,6 @@
 import os
 import sys
+from typing import Any
 
 import comet_ml  # noqa: F401
 import matplotlib.pyplot as plt
@@ -176,9 +177,9 @@ def test_masked(
     )
     plot_indices = set(plot_indices)
 
-    all_latents = []
-    all_channel_variances = []
-    all_channel_maes = []
+    all_latents: list[torch.Tensor] = []
+    all_channel_variances: list[torch.Tensor] = []
+    all_channel_maes: list[torch.Tensor] = []
 
     with torch.no_grad():
         for idx, (img, channel_ids, panel_idx, img_path) in enumerate(
@@ -250,15 +251,15 @@ def test_masked(
     val_mae = running_mae / len(test_dataloader)
     val_mse = running_mse / len(test_dataloader)
 
-    all_latents = torch.cat(all_latents)
-    rankme = RankMe(all_latents)
+    latents_cat = torch.cat(all_latents)
+    rankme = RankMe(latents_cat)
 
     # Calculate Pearson correlation between predicted variances and MAEs per channel
-    all_channel_variances = torch.cat(all_channel_variances)
-    all_channel_maes = torch.cat(all_channel_maes)
+    channel_variances_cat = torch.cat(all_channel_variances)
+    channel_maes_cat = torch.cat(all_channel_maes)
     # Calculate Pearson correlation using flattened data across all batches
     variance_mae_corr = torch.corrcoef(
-        torch.stack([all_channel_variances.flatten(), all_channel_maes.flatten()])
+        torch.stack([channel_variances_cat.flatten(), channel_maes_cat.flatten()])
     )[0, 1].item()
 
     val_metrics = {
@@ -362,7 +363,7 @@ if __name__ == "__main__":
 
     # Build model configuration
     num_channels = len(TOKENIZER)
-    model_config = {
+    model_config: dict[str, Any] = {
         "num_channels": num_channels,
         "encoder_config": config.encoder_config.model_dump(),
         "decoder_config": config.decoder_config.model_dump(),
@@ -372,6 +373,7 @@ if __name__ == "__main__":
     start_epoch = 0
     checkpoint = None
     if config.resolve_checkpoint():
+        assert config.from_checkpoint is not None
         print(f"Loading model from checkpoint: {config.from_checkpoint}")
         checkpoint = torch.load(config.from_checkpoint, map_location=device)
         model = MultiplexAutoencoder.load_from_checkpoint(
