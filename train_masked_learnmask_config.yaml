@@ -1,0 +1,71 @@
+# Configuration for training with learnable mask token (beta-NLL loss, no GP)
+# Spatial masking uses a learnable scalar token instead of zero-fill
+
+# ============================================================================
+# ENCODER / DECODER ARCHITECTURE
+# ============================================================================
+encoder:
+    ma_layers_blocks: [4,]
+    ma_embedding_dims: [16,]
+    pm_layers_blocks: [4, 4, 4]
+    pm_embedding_dims: [128, 256, 512]
+    use_latent_norm: true
+    use_mask_token: true
+    mask_token_init: 0.0
+
+    hyperkernel:
+      kernel_size: 1
+      padding: 0
+      stride: 1
+      use_bias: true
+
+decoder:
+  decoded_embed_dim: 384
+  num_blocks: 1
+
+  hyperkernel:
+      kernel_size: 1
+      padding: 0
+      stride: 1
+      use_bias: true
+
+# ============================================================================
+# DATA CONFIGURATION
+# ============================================================================
+panel_config: configs/all_panels_config.yaml
+tokenizer_config: configs/all_markers_tokenizer.yaml
+input_image_size: [112, 112]
+num_workers: 8
+batch_size: 8
+
+# ============================================================================
+# TRAINING CONFIGURATION
+# ============================================================================
+device: cuda
+lr: 5e-4
+final_lr: 1e-5
+weight_decay: 0.0001
+gradient_accumulation_steps: 1
+epochs: 200
+frac_warmup_steps: 0.01
+min_channels_frac: 0.75
+spatial_masking_ratio: 0.6
+fully_masked_channels_max_frac: 0.5
+mask_patch_size: 8
+beta: 0.5
+
+# ============================================================================
+# CHECKPOINT CONFIGURATION
+# ============================================================================
+from_checkpoint: null
+reset_lr_schedule: false
+checkpoints_dir: checkpoints
+save_checkpoint_freq: 5
+
+# ============================================================================
+# COMET.ML LOGGING
+# ============================================================================
+tags: ['SZARY', 'learnmask', 'mask-token']
+comet_project: multiplex-image-model
+comet_workspace: micha-zmys-owski
+comet_api_key: null

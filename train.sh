@@ -32,6 +32,9 @@ source ~/venv/bin/activate
 if [ "$use_gp" = "gp" ]; then
     echo "Starting GP training with config: $config_file"
     python3 train_masked_model_gp.py "$config_file"
+elif [ "$use_gp" = "learnmask" ]; then
+    echo "Starting learnmask training with config: $config_file"
+    python3 train_masked_model_learnmask.py "$config_file"
 else
     echo "Starting standard training with config: $config_file"
     python3 train_masked_model.py "$config_file"
