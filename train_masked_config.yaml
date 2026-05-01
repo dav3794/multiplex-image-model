@@ -4,7 +4,7 @@ encoder:
     ma_embedding_dims: [16,]
     # pan-marker part
     pm_layers_blocks: [4, 4, 4]
-    pm_embedding_dims: [128, 256, 512]
+    pm_embedding_dims: [192, 384, 768]
 
     hyperkernel:
       kernel_size: 1
@@ -13,7 +13,7 @@ encoder:
       use_bias: true
 
 decoder:
-  decoded_embed_dim: 384
+  decoded_embed_dim: 512
   num_blocks: 1
 
   hyperkernel:
