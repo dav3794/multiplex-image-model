@@ -24,10 +24,9 @@ use_gp=${2:-""}
 
 mkdir -p logs
 
-# Set COMET_API_KEY in your environment or ~/.bashrc before submitting
-# export COMET_API_KEY=your_key_here
+. ~/.bashrc
 
-source ~/venv/bin/activate
+. ~/venv/bin/activate
 
 if [ "$use_gp" = "gp" ]; then
     echo "Starting GP training with config: $config_file"
