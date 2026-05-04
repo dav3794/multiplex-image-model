@@ -24,7 +24,7 @@ use_gp=${2:-""}
 
 mkdir -p logs
 
-export COMET_API_KEY=$(grep -oP '(?<=COMET_API_KEY=)\S+' ~/.bashrc | head -1)
+export COMET_API_KEY=$(grep COMET_API_KEY ~/.bashrc | cut -d= -f2)
 
 . ~/venv/bin/activate
 
