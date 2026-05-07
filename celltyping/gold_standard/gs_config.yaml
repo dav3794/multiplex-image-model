@@ -1,0 +1,13 @@
+base_path: /path/to/project/gold_standard
+dataset_name: nsclc2-panel1
+
+raw:
+  img_dir: /path/to/data/nsclc2_cells/imgs/
+  mask_dir: /path/to/data/nsclc2_cells/masks/
+  rds_path: /path/to/data/sce_labelled_V1.rds
+  channels_csv_path: /path/to/metadata/nsclc2-panel1/markers.csv
+
+processed_dir: /path/to/project/gold_standard/dataset
+
+virtues_embeddings_dir: /path/to/project/gold_standard/dataset/marker_embeddings
+virtues_config_path: ./core/models/virtues_config.yaml
