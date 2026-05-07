@@ -1,0 +1,13 @@
+base_path: /path/to/project/danenberg
+dataset_name: danenberg
+
+raw:
+  img_dir: /path/to/data/danenberg_breast/MBTMEIMCPublic/Images/
+  mask_dir: /path/to/data/danenberg_breast/MBTMEIMCPublic/Images/
+  meta_path: /path/to/project/danenberg/danenberg_sc_meta_300k.csv
+  channels_csv_path: /path/to/metadata/danenberg/markers.csv
+
+processed_dir: /path/to/project/danenberg/dataset
+
+virtues_embeddings_dir: /path/to/project/danenberg/dataset/marker_embeddings
+virtues_config_path: ./core/models/virtues_config.yaml

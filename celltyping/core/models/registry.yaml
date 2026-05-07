@@ -1,0 +1,71 @@
+models:
+  virtues:
+    setup_func: core.models.virtues.setup_virtues
+    repo_path: ../virtues
+    cache_dir: /path/to/checkpoints/virtues_ckpt
+
+  virtuesours:
+    setup_func: core.models.virtuesours.setup_virtuesours
+    repo_path: ../virtues
+    ckpt_path: /path/to/models/virtues_ours.safetensors
+
+  virtuesours_arcsinh:
+    setup_func: core.models.virtuesours_arcsinh.setup_virtuesours_arcsinh
+    repo_path: ../virtues
+    panel_conf_path: /path/to/configs/all_panels_config.yaml
+    ckpt_path: /path/to/models/virtues_new_our_norm.safetensors
+
+  beta603:
+    setup_func: core.models.immuvis.setup_immuvis
+    repo_path: ../immuvis-repo
+    checkpoint_path: /path/to/models/ImmuVis-603-beta-768-ma1.pth
+    conf: /path/to/models/config.ImmuVis-603-beta-768-ma1.yaml
+    panel_conf_path: /path/to/configs/all_panels_config.yaml
+    tokenizer_path: /path/to/configs/all_markers_tokenizer.yaml
+
+  beta610:
+    setup_func: core.models.immuvis.setup_immuvis
+    repo_path: ../immuvis-repo
+    checkpoint_path: /path/to/models/ImmuViT-610-beta-768-ma0.pth
+    conf: /path/to/models/config.ImmuViT-610-beta-768-ma0.yaml
+    panel_conf_path: /path/to/configs/all_panels_config.yaml
+    tokenizer_path: /path/to/configs/all_markers_tokenizer.yaml
+
+  beta614:
+    setup_func: core.models.immuvis.setup_immuvis
+    repo_path: ../immuvis-repo
+    checkpoint_path: /path/to/models/ImmuSwin-614-beta-768-ma1.pth
+    conf: /path/to/models/config.ImmuSwin-614-beta-768-ma1.yaml
+    panel_conf_path: /path/to/configs/all_panels_config.yaml
+    tokenizer_path: /path/to/configs/all_markers_tokenizer.yaml
+
+  beta658:
+    setup_func: core.models.immuvis_vp.setup_immuvis_hardsigmoid
+    repo_path: ../immuvis-repo
+    checkpoint_path: /path/to/models/ImmuVis-658-beta-768-ma1-zeroshot_hn-zeromask.pth
+    conf: /path/to/models/config.ImmuVis-658-beta-768-ma1-zeroshot_hn-zeromask.yaml
+    panel_conf_path: /path/to/configs/all_panels_config.yaml
+    tokenizer_path: /path/to/configs/all_markers_tokenizer.yaml
+
+  beta659:
+    setup_func: core.models.immuvis_vp.setup_immuvis_hardsigmoid
+    repo_path: ../immuvis-repo
+    checkpoint_path: /path/to/models/ImmuViT-659-beta-768-ma0-zeroshot_hn-zeromask.pth
+    conf: /path/to/models/config.ImmuViT-659-beta-768-ma0-zeroshot_hn-zeromask.yaml
+    panel_conf_path: /path/to/configs/all_panels_config.yaml
+    tokenizer_path: /path/to/configs/all_markers_tokenizer.yaml
+
+  eva:
+    setup_func: core.models.eva.setup_eva
+    conf: ../Eva/config.yaml
+    repo_path: ../Eva
+    embeddings_path: /path/to/embeddings/GenePT_embedding.pkl
+    panel_conf_path: /path/to/configs/all_panels_config.yaml
+
+  evaours:
+    setup_func: core.models.evaours.setup_evaours
+    conf: ../Eva/config_ours.yaml
+    repo_path: ../Eva
+    ckpt_path: /path/to/models/eva_ours.ckpt
+    embeddings_path: /path/to/embeddings/GenePT_embedding.pkl
+    panel_conf_path: /path/to/configs/all_panels_config.yaml

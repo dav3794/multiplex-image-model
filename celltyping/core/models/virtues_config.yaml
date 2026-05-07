@@ -1,0 +1,43 @@
+datasets_config: null # Path to dataset config file
+
+experiments_dir: null # Outputs will be written to {experiments_dir}/{experiment.name}/
+marker_embedding_dir: null # Directory containing marker embeddings as .pt files
+
+experiment:
+  name: null # Initialize with the name of the run
+  seed: 42
+  wandb_entity: null
+  wandb_project: null
+  wandb_mode: disabled # "online", "offline", or "disabled"
+
+training:
+  epochs: 100
+  batch_size: 16
+  fp16: True
+  bf16: False
+  num_workers: 10
+  gradient_accumulation_steps: 1
+  lr: 0.0002
+  lr_scheduler_type: cosine
+  weight_decay: 0.01
+  warmup_epochs: 10
+  disable_eval: false
+
+model:
+  patch_size: 8
+  model_dim: 512
+  feedforward_dim: 1024
+  encoder_pattern: hvhvhvhvhvhvhvhv
+  num_encoder_heads: 8
+  decoder_pattern: ffff
+  num_decoder_heads: 8
+  num_decoder_hidden_layers: 0
+  positional_embedding_type: rope
+  dropout: 0.0
+  group_layers: False
+  norm_after_encoder_decoder: True
+
+data:
+  crop_size: 128
+  masking_ratio: [0.6, 1.0]
+  channel_fraction: [0.75, 1.0]

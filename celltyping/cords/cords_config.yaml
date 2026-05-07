@@ -1,0 +1,13 @@
+base_path: /path/to/project/cords
+dataset_name: cords
+
+raw:
+  img_dir: /path/to/data/cords_nsclc_2023/ome_tiffs
+  mask_dir: /path/to/data/cords_nsclc_2023/raw/Cell masks
+  meta_path: /path/to/project/cords/cords_300k.csv
+  channels_csv_path: /path/to/metadata/cords/markers.csv
+
+processed_dir: /path/to/project/cords/dataset
+
+virtues_embeddings_dir: /path/to/project/cords/dataset/marker_embeddings
+virtues_config_path: ./core/models/virtues_config.yaml
