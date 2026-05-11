@@ -57,7 +57,7 @@ beta: 0.5
 # ============================================================================
 # CHECKPOINT CONFIGURATION
 # ============================================================================
-from_checkpoint: null
+from_checkpoint: checkpoints/last_checkpoint-ImVs-29.pth
 reset_lr_schedule: false
 checkpoints_dir: checkpoints
 save_checkpoint_freq: 5
