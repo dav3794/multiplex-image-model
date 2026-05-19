@@ -634,6 +634,7 @@ if __name__ == "__main__":
                 grid_size=H_gp,
                 kernel_jitter=gp_kernel_jitter,
                 spatial_matern_kernel_length_scale=gp_lengthscale,
+                learn_lengthscale=gp_learn_lengthscale,
                 device=device,
             )
         else:
