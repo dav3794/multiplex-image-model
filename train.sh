@@ -34,6 +34,9 @@ if [ "$use_gp" = "gp" ]; then
 elif [ "$use_gp" = "learnmask" ]; then
     echo "Starting learnmask training with config: $config_file"
     python3 train_masked_model_learnmask.py "$config_file"
+elif [ "$use_gp" = "learnmask_gp" ]; then
+    echo "Starting learnmask+GP training with config: $config_file"
+    python3 train_masked_model_learnmask_gp.py "$config_file"
 else
     echo "Starting standard training with config: $config_file"
     python3 train_masked_model.py "$config_file"
