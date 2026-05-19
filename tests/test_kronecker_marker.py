@@ -294,3 +294,28 @@ def test_end_to_end_training_step():
     assert loss.isfinite(), f"Loss is not finite: {loss.item()}"
 
     print(f"End-to-end smoke test passed. Loss: {loss.item():.4f}")
+
+
+def test_log_prob_joint_C_greater_than_embed_dim():
+    """C > marker_embed_dim: K_C has repeated eigenvalues — float64 eigh path must not diverge."""
+    from multiplex_model.modules.gp_covariance import KroneckerMarkerCovariance
+
+    C, marker_embed_dim, grid_size = 10, 4, 8
+    N = grid_size * grid_size
+    mod = KroneckerMarkerCovariance(
+        grid_size=grid_size,
+        marker_embed_dim=marker_embed_dim,
+        hyperkernel_model_dim=16,
+        kernel_jitter=1e-2,
+        marker_jitter=1e-2,
+        device="cpu",
+    )
+    torch.manual_seed(0)
+    targets = torch.randn(N, C)
+    mu = torch.randn(N, C)
+    sigma = torch.ones(N, C) * 0.5
+    marker_emb = torch.randn(C, 16)
+
+    lp = mod.log_prob_joint(mu, sigma, targets, marker_emb)
+
+    assert lp.isfinite(), f"log_prob_joint non-finite with C={C} > marker_embed_dim={marker_embed_dim}: {lp.item()}"

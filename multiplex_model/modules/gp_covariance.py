@@ -563,7 +563,7 @@ class KroneckerMarkerCovariance(nn.Module):
         # triple_eigs[i, j, k] = kron_eigs[i,j] * lam_C[k] + kernel_jitter
         triple_eigs = self.kron_eigs.unsqueeze(-1) * lam_C.unsqueeze(0).unsqueeze(0) + self.kernel_jitter
 
-        return V_C, triple_eigs, K_C
+        return V_C, triple_eigs, K_C.double().to(E.dtype)
 
     def log_prob_joint(
         self,
@@ -600,6 +600,11 @@ class KroneckerMarkerCovariance(nn.Module):
         U_block = torch.diag_embed(U_all).reshape(NC, C)
 
         # log det(A)
+        if (triple_eigs <= 0).any():
+            raise RuntimeError(
+                f"Non-positive triple eigenvalues (min={triple_eigs.min().item():.3e}). "
+                "Increase kernel_jitter or marker_jitter."
+            )
         log_det_A = triple_eigs.log().sum()
 
         # A⁻¹ applied to error and U_block columns (C+1 RHS, batched)

@@ -5,6 +5,8 @@ This script extends the standard training with a Gaussian Process-based negative
 log-likelihood loss that models spatial correlations using the GP covariance module.
 """
 
+import logging
+import math
 import os
 import sys
 
@@ -57,6 +59,8 @@ from multiplex_model.utils import (
     plot_reconstructs_with_masks,
     plot_reconstructs_with_uncertainty,
 )
+
+logger = logging.getLogger(__name__)
 
 
 def train_masked_gp(
@@ -197,6 +201,11 @@ def train_masked_gp(
                 # Fall back to standard beta-NLL loss
                 loss = beta_nll_loss(img, mi, logvar, beta=beta)
                 epoch_loss_components["total_loss"].append(loss.item())
+
+            if not loss.isfinite():
+                logger.warning("Non-finite loss at step %d epoch %d, skipping batch", batch_idx, epoch)
+                optimizer.zero_grad()
+                continue
 
             scaler.scale(loss / gradient_accumulation_steps).backward()
 
@@ -355,10 +364,11 @@ def test_masked_gp(
             batch_var_mse_corr = torch.corrcoef(
                 torch.stack([variance_per_channel.cpu(), mse_per_channel.cpu()])
             )[0, 1].item()
-            log_validation_batch_metrics(
-                variance_mse_correlation_per_batch=batch_var_mse_corr,
-                step=epoch * len(test_dataloader) + idx,
-            )
+            if math.isfinite(batch_var_mse_corr):
+                log_validation_batch_metrics(
+                    variance_mse_correlation_per_batch=batch_var_mse_corr,
+                    step=epoch * len(test_dataloader) + idx,
+                )
 
             # Compute loss
             if use_gp_loss and gp_loss_fn is not None:
@@ -659,8 +669,14 @@ if __name__ == "__main__":
         print(f"Loading model from checkpoint: {config.from_checkpoint}")
         checkpoint = torch.load(config.from_checkpoint, map_location=device)
         model.load_state_dict(checkpoint["model_state_dict"])
-        if gp_covariance_module is not None and "gp_covariance_state_dict" in checkpoint:
-            gp_covariance_module.load_state_dict(checkpoint["gp_covariance_state_dict"])
+        if gp_covariance_module is not None:
+            if "gp_covariance_state_dict" in checkpoint:
+                gp_covariance_module.load_state_dict(checkpoint["gp_covariance_state_dict"])
+            else:
+                logger.warning(
+                    "Checkpoint missing 'gp_covariance_state_dict' — "
+                    "KroneckerMarkerCovariance starts from random init"
+                )
         start_epoch = checkpoint["epoch"] + 1
 
     # Optimizer and scheduler

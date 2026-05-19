@@ -511,3 +511,95 @@ def test_log_training_metrics_accepts_mask_token():
         step=0,
         mask_token=0.123,
     )
+
+
+# ---------------------------------------------------------------------------
+# Test 9: learnmask+GP validation loop smoke test
+# ---------------------------------------------------------------------------
+
+def test_learnmask_gp_validation_loop_runs():
+    """test_masked_learnmask_gp runs end-to-end without error and returns finite metrics."""
+    from train_masked_model_learnmask_gp import test_masked_learnmask_gp
+    from multiplex_model.modules import MultiplexAutoencoder
+
+    torch.manual_seed(42)
+    H = W = 8
+    C = 4
+    B = 2
+
+    # Build model with use_mask_token=True
+    hyperkernel_model_dim = 16 * 1 * 8
+    model = MultiplexAutoencoder(
+        num_channels=C,
+        encoder_config={
+            "ma_layers_blocks": [1],
+            "ma_embedding_dims": [8],
+            "pm_layers_blocks": [1],
+            "pm_embedding_dims": [16],
+            "hyperkernel_config": {"kernel_size": 1, "padding": 0, "stride": 1, "use_bias": True},
+            "use_mask_token": True,
+            "mask_token_init": 0.0,
+        },
+        decoder_config={
+            "decoded_embed_dim": 16,
+            "num_blocks": 1,
+            "hyperkernel_config": {"kernel_size": 1, "padding": 0, "stride": 1, "use_bias": True},
+        },
+    )
+    _, gp_module, loss_fn = _build_tiny_setup(grid_size=H, C_total=C)
+    dataloader = _make_fake_dataloader(B=B, C=C, H=H, W=W, num_batches=3)
+    marker_names_map = {i: f"marker_{i}" for i in range(C)}
+
+    val_metrics = test_masked_learnmask_gp(
+        model=model,
+        test_dataloader=dataloader,
+        device="cpu",
+        epoch=0,
+        gp_covariance_module=gp_module,
+        gp_loss_fn=loss_fn,
+        marker_names_map=marker_names_map,
+        num_plots=1,
+        spatial_masking_ratio=0.5,
+        fully_masked_channels_max_frac=0.25,
+        mask_patch_size=2,
+        use_gp_loss=True,
+        use_marker_covariance=True,
+    )
+
+    for key in ("val_loss", "val_mae", "val_mse", "val_standard_nll", "val_gp_nll"):
+        assert key in val_metrics, f"Missing key: {key}"
+        assert math.isfinite(val_metrics[key]), f"{key} is not finite: {val_metrics[key]}"
+
+
+# ---------------------------------------------------------------------------
+# Test 10: mask token gradient flow
+# ---------------------------------------------------------------------------
+
+def test_mask_token_gradient_flows():
+    """Backward pass propagates gradient to mask_token parameter."""
+    from multiplex_model.modules.immuvis import MultiplexImageEncoder
+
+    torch.manual_seed(0)
+    B, C, H, W = 1, 2, 4, 4
+    enc = MultiplexImageEncoder(
+        num_channels=C,
+        ma_layers_blocks=[1],
+        ma_embedding_dims=[8],
+        pm_layers_blocks=[1],
+        pm_embedding_dims=[16],
+        hyperkernel_config={"kernel_size": 1, "padding": 0, "stride": 1, "use_bias": True},
+        use_mask_token=True,
+        mask_token_init=0.0,
+    )
+
+    x = torch.rand(B, C, H, W)
+    spatial_mask = torch.zeros(B, C, H, W, dtype=torch.bool)
+    spatial_mask[:, :, :2, :2] = True
+    enc_indices = torch.arange(C).unsqueeze(0).expand(B, -1)
+
+    out = enc(x, enc_indices, spatial_mask=spatial_mask)
+    loss = out["output"].sum()
+    loss.backward()
+
+    assert enc.mask_token is not None
+    assert enc.mask_token.grad is not None, "mask_token has no gradient — not in computation graph"

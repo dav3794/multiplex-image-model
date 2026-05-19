@@ -304,11 +304,12 @@ class KroneckerGPNLLLoss(nn.Module):
         B, C, H, W = target.shape
         N = H * W
 
-        assert H == W == self.covariance_module.grid_size, (
-            f"Image must be square with H == W == grid_size, "
-            f"got {H}×{W} vs grid_size={self.covariance_module.grid_size}. "
-            f"Check downscale_factor or grid_size."
-        )
+        if H != W or H != self.covariance_module.grid_size:
+            raise ValueError(
+                f"Image must be square with H == W == grid_size, "
+                f"got {H}×{W} vs grid_size={self.covariance_module.grid_size}. "
+                f"Check downscale_factor or grid_size."
+            )
 
         # Reshape to [B, N, C] — loop over batch, batch over channels
         target_bnc = target.reshape(B, C, N).permute(0, 2, 1)   # [B, N, C]
@@ -389,6 +390,7 @@ class HybridKroneckerGPNLLLoss(nn.Module):
             "total_loss":    total_loss.item(),
         }
         return total_loss, loss_dict
+
 
 
 class KroneckerMarkerGPNLLLoss(nn.Module):

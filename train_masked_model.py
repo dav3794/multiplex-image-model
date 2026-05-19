@@ -1,3 +1,4 @@
+import math
 import os
 import sys
 
@@ -217,10 +218,11 @@ def test_masked(
             batch_var_mse_corr = torch.corrcoef(
                 torch.stack([variance_per_channel.cpu(), mse_per_channel.cpu()])
             )[0, 1].item()
-            log_validation_batch_metrics(
-                variance_mse_correlation_per_batch=batch_var_mse_corr,
-                step=epoch * len(test_dataloader) + idx,
-            )
+            if math.isfinite(batch_var_mse_corr):
+                log_validation_batch_metrics(
+                    variance_mse_correlation_per_batch=batch_var_mse_corr,
+                    step=epoch * len(test_dataloader) + idx,
+                )
 
             loss = nll_loss(img, mi, logvar)
             running_loss += loss.item()

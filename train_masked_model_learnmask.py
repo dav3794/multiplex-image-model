@@ -1,3 +1,4 @@
+import math
 import os
 import sys
 from typing import Any
@@ -107,7 +108,7 @@ def train_masked(
                 scaler.update()
                 optimizer.zero_grad()
                 scheduler.step()
-                mask_token = model.encoder.mask_token.item()
+                mask_token = model.encoder.mask_token.item() if model.encoder.mask_token is not None else None
 
                 log_training_metrics(
                     loss=loss.item(),
@@ -261,6 +262,8 @@ def test_masked(
     variance_mae_corr = torch.corrcoef(
         torch.stack([channel_variances_cat.flatten(), channel_maes_cat.flatten()])
     )[0, 1].item()
+    if not math.isfinite(variance_mae_corr):
+        variance_mae_corr = float("nan")
 
     val_metrics = {
         "val_loss": val_loss,

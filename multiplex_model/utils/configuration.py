@@ -3,7 +3,7 @@
 import os
 from typing import Any
 
-from pydantic import BaseModel, Field, ValidationInfo, field_validator
+from pydantic import BaseModel, Field, ValidationInfo, field_validator, model_validator
 
 from .train_logging import get_run_name
 
@@ -257,7 +257,7 @@ class TrainingConfig(BaseModel):
         32, gt=0, description="Projection dimension for marker embeddings in K_C computation"
     )
     marker_jitter: float = Field(
-        1e-2, ge=0, description="Jitter added to marker covariance K_C for numerical stability"
+        1e-2, gt=0, description="Jitter added to marker covariance K_C for numerical stability"
     )
 
     # Model architecture
@@ -294,6 +294,12 @@ class TrainingConfig(BaseModel):
         default_factory=list, description="Tags for Comet.ml experiment"
     )
     run_name: str | None = Field(None, description="Name for Comet.ml experiment")
+
+    @model_validator(mode='after')
+    def _validate_marker_covariance_requires_kronecker(self) -> 'TrainingConfig':
+        if self.use_marker_covariance and not self.use_kronecker_gp:
+            raise ValueError("use_marker_covariance=True requires use_kronecker_gp=True")
+        return self
 
     def resolve_checkpoint(self) -> bool:
         """Resolve checkpoint path and determine if checkpoint should be loaded.

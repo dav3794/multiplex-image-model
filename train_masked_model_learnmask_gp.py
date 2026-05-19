@@ -4,6 +4,8 @@ Merges the mask-token flow from `train_masked_model_learnmask.py` with the
 Kronecker + marker covariance GP loss from `train_masked_model_gp.py`.
 """
 
+import logging
+import math
 import os
 import sys
 from typing import Any
@@ -51,6 +53,8 @@ from multiplex_model.utils import (
     plot_reconstructs_with_masks,
     plot_reconstructs_with_uncertainty,
 )
+
+logger = logging.getLogger(__name__)
 
 
 def train_masked_learnmask_gp(
@@ -131,6 +135,11 @@ def train_masked_learnmask_gp(
                 loss = beta_nll_loss(img, mi, logvar, beta=beta)
                 epoch_loss_components["total_loss"].append(loss.item())
 
+            if not loss.isfinite():
+                logger.warning("Non-finite loss at step %d epoch %d, skipping batch", batch_idx, epoch)
+                optimizer.zero_grad()
+                continue
+
             scaler.scale(loss / gradient_accumulation_steps).backward()
 
             if (batch_idx + 1) % gradient_accumulation_steps == 0:
@@ -141,7 +150,7 @@ def train_masked_learnmask_gp(
                 optimizer.zero_grad()
                 scheduler.step()
 
-                mask_token_value = model.encoder.mask_token.item()
+                mask_token_value = model.encoder.mask_token.item() if model.encoder.mask_token is not None else None
 
                 metrics: dict[str, Any] = {
                     "loss": loss.item(),
@@ -273,10 +282,11 @@ def test_masked_learnmask_gp(
             batch_var_mse_corr = torch.corrcoef(
                 torch.stack([variance_per_channel.cpu(), mse_per_channel.cpu()])
             )[0, 1].item()
-            log_validation_batch_metrics(
-                variance_mse_correlation_per_batch=batch_var_mse_corr,
-                step=epoch * len(test_dataloader) + idx,
-            )
+            if math.isfinite(batch_var_mse_corr):
+                log_validation_batch_metrics(
+                    variance_mse_correlation_per_batch=batch_var_mse_corr,
+                    step=epoch * len(test_dataloader) + idx,
+                )
 
             if use_gp_loss and gp_loss_fn is not None:
                 marker_emb = model.encoder.hyperkernel.hyperkernel_weights(channel_ids)
@@ -540,10 +550,18 @@ if __name__ == "__main__":
         ).to(device)
         if "gp_covariance_state_dict" in checkpoint:
             gp_covariance_module.load_state_dict(checkpoint["gp_covariance_state_dict"])
+        else:
+            logger.warning(
+                "Checkpoint missing 'gp_covariance_state_dict' — "
+                "KroneckerMarkerCovariance starts from random init"
+            )
         start_epoch = checkpoint.get("epoch", -1) + 1
     else:
         model = MultiplexAutoencoder(**model_config).to(device)
 
+    # When extending training (bumping config.epochs), use reset_lr_schedule: true to get
+    # a fresh cosine cycle. Without it, total_steps is reused from the checkpoint, and if
+    # config.epochs > original epochs the scheduler may be past its annealing boundary.
     if checkpoint is not None and "total_steps" in checkpoint and not config.reset_lr_schedule:
         total_steps = checkpoint["total_steps"]
     else:
