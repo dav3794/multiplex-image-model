@@ -563,7 +563,6 @@ def test_learnmask_gp_validation_loop_runs():
         fully_masked_channels_max_frac=0.25,
         mask_patch_size=2,
         use_gp_loss=True,
-        use_marker_covariance=True,
     )
 
     for key in ("val_loss", "val_mae", "val_mse", "val_standard_nll", "val_gp_nll"):

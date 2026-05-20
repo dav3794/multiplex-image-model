@@ -213,6 +213,8 @@ def train_masked_learnmask_gp(
     final_checkpoint: dict[str, Any] = {"model_state_dict": model.state_dict()}
     if hasattr(model, "get_architecture_config"):
         final_checkpoint["model_config"] = model.get_architecture_config()
+    if gp_covariance_module is not None:
+        final_checkpoint["gp_covariance_state_dict"] = gp_covariance_module.state_dict()
     torch.save(final_checkpoint, final_model_path)
 
 

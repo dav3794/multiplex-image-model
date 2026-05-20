@@ -60,7 +60,7 @@ min_channels_frac: 0.75
 spatial_masking_ratio: 0.6
 fully_masked_channels_max_frac: 0.5
 mask_patch_size: 8
-from_checkpoint: checkpoints/final_model-ImVs-12.pth
+from_checkpoint: checkpoints/last_checkpoint-ImVs-12.pth
 reset_lr_schedule: true              # fresh cosine cycle from trained weights
 checkpoints_dir: checkpoints
 save_checkpoint_freq: 5

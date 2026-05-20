@@ -218,3 +218,4 @@ checkpoints/
 .DS_Store
 CLAUDE.md
 docs/superpowers/
+immuvis.py
