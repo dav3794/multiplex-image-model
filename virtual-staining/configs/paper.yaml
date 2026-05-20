@@ -1,0 +1,58 @@
+marker_stats_csv: "data/marker_ds_stats.csv"
+crop_size: [128, 128]
+output_dir: "results"
+
+models:
+
+  - name: "virtues_our_norm"
+    path: "/raid_encrypted/immucan/recons/virtues_our_norm/"
+    format: "virtues_npy"
+    display_name: "Virtues_{IMC17M}_{OP}"
+    prediction_transform:
+      type: "immu_offset"
+      params: { scale: 3.4 }
+    ground_truth:
+      source_model: "immuvis_612"
+      transform:
+        type: "immu_offset"
+        params: { scale: 3.4 }
+
+  - name: "eva_hn_recon_crop"
+    path: "/raid_encrypted/immucan/recons/eva_hn_recon_crop/"
+    format: "virtues_npy"
+    display_name: "EVA_{OP}"
+    prediction_transform:
+      type: "immu_offset"
+      params: { scale: 3.4 }
+    ground_truth:
+      source_model: "immuvis_612"
+      transform:
+        type: "immu_offset"
+        params: { scale: 3.4 }
+
+  - name: "immuvis_609"
+    path: "/raid_encrypted/immucan/results/with_reconstructs/recons/immuvis_609_loo/"
+    format: "immuvis_npz"
+    display_name: "ImmuVis_{ViT}"
+    filter_pairs_to: "virtues_our_norm"
+    prediction_transform:
+      type: "immu_offset"
+      params: { scale: 3.4 }
+
+  - name: "immuvis_612"
+    path: "/raid_encrypted/immucan/results/with_reconstructs/recons/immuvis_612_loo/"
+    format: "immuvis_npz"
+    display_name: "ImmuVis_{Conv}"
+    filter_pairs_to: "virtues_our_norm"
+    prediction_transform:
+      type: "immu_offset"
+      params: { scale: 3.4 }
+
+  - name: "immuvis_622"
+    path: "/raid_encrypted/immucan/results/with_reconstructs/recons/immuvis_622_loo/"
+    format: "immuvis_npz"
+    display_name: "ImmuVis_{Swin}"
+    filter_pairs_to: "virtues_our_norm"
+    prediction_transform:
+      type: "immu_offset"
+      params: { scale: 3.4 }
