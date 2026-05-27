@@ -1,0 +1,246 @@
+paths:
+  train: ...
+  test: ...
+datasets:
+- allam_2022_cohort_1
+- allam_2022_cohort_2
+- hu_2023_p1
+- hu_2023_p2
+- hu_2023_p3
+- moldoveanu_2022_p1
+- moldoveanu_2022_p2
+- schulz_2018_p1
+- schulz_2018_p2
+clip_limits:
+  allam_2022_cohort_1: 2.8
+  allam_2022_cohort_2: 4.7
+  hu_2023_p1: 2.4
+  hu_2023_p2: 3.6
+  hu_2023_p3: 2.5
+  moldoveanu_2022_p1: 4.0
+  moldoveanu_2022_p2: 3.9
+  schulz_2018_p1: 4.4
+  schulz_2018_p2: 4.0
+markers:
+  allam_2022_cohort_1:
+  - CD103
+  - CD11c
+  - CD163
+  - CD20
+  - CD206
+  - CD3
+  - CD4
+  - CD45RO
+  - CD68
+  - CD8a
+  - CD95
+  - Collagen Type I
+  - DNA1
+  - DNA2
+  - Ecad
+  - FOXP3
+  - GrzB
+  - Histone H3 k9me3
+  - HLADR
+  - panCK
+  - PD1
+  - PDL1
+  - SMA
+  - TCF1
+  - Vimentin
+  allam_2022_cohort_2:
+  - CD20
+  - CD3
+  - CD4
+  - CD44
+  - CD45RO
+  - CD68
+  - CD8a
+  - Collagen Type I
+  - DNA1
+  - DNA2
+  - Ecad
+  - FOXP3
+  - GrzB
+  - Histone H3
+  - Histone H3 k4me3
+  - HLADR
+  - Ki67
+  - panCK
+  - PD1
+  - PDL1
+  - SMA
+  - Vimentin
+  hu_2023_p1:
+  - BCL6
+  - c-Myc
+  - CD11b
+  - CD11c
+  - CD138
+  - CD20
+  - CD21
+  - CD27
+  - CD3
+  - CD38
+  - CD4
+  - CD83
+  - CD86
+  - CD8a
+  - Collagen Type I
+  - CXCR4
+  - CXCR5
+  - DNA1
+  - DNA2
+  - EZH2
+  - FOXP3
+  - Histone H3 k27me3
+  - ICOS
+  - Ki67
+  - PD1
+  - Vimentin
+  hu_2023_p2:
+  - CD3
+  - CD45RA
+  - CD45RO
+  - CD8a
+  - DNA1
+  - DNA2
+  - Ecad
+  - panCK
+  - SMA
+  - Vimentin
+  hu_2023_p3:
+  - CD11b
+  - CD11c
+  - CD20
+  - CD3
+  - CD31
+  - CD4
+  - CD44
+  - CD45RA
+  - CD45RO
+  - CD68
+  - CD8a
+  - Collagen Type I
+  - DNA1
+  - DNA2
+  - Ecad
+  - FOXP3
+  - GrzB
+  - Histone H3
+  - Ki67
+  - panCK
+  - SMA
+  - Vimentin
+  moldoveanu_2022_p1:
+  - beta-Catenin
+  - c-Caspase3c-PARP
+  - CCR7
+  - CD134
+  - CD14
+  - CD16
+  - CD20
+  - CD29
+  - CD3
+  - CD31
+  - CD4
+  - CD40
+  - CD45
+  - CD45RA
+  - CD45RO
+  - CD68
+  - CD8a
+  - Collagen Type I
+  - DNA1
+  - DNA2
+  - ERK
+  - FOXP3
+  - GrzB
+  - Histone H3
+  - HLADR
+  - ICOS
+  - Ki67
+  - LAG3
+  - MEK1-2
+  - PDL1
+  - pERK
+  - pMEK1-2
+  - S100
+  - SMA
+  - Sox10
+  - Tim3
+  - VISTA
+  moldoveanu_2022_p2:
+  - beta-Catenin
+  - c-Caspase3c-PARP
+  - CCR7
+  - CD134
+  - CD14
+  - CD20
+  - CD29
+  - CD3
+  - CD31
+  - CD4
+  - CD40
+  - CD45
+  - CD45RA
+  - CD45RO
+  - CD47
+  - CD56
+  - CD68
+  - CD8a
+  - Collagen Type I
+  - DNA1
+  - DNA2
+  - FOXP3
+  - GrzB
+  - Histone H3
+  - HLADR
+  - ICOS
+  - Ki67
+  - LAG3
+  - PDL1
+  - pERK
+  - S100
+  - SMA
+  - Sox10
+  - Tim3
+  - VISTA
+  schulz_2018_p1:
+  - CD3
+  - CD44
+  - CD68
+  - CK14
+  - CK19
+  - CK5
+  - CK8-18
+  - DNA1
+  - DNA2
+  - Ecad
+  - FSP1
+  - HER2 (3B5)
+  - Histone H3
+  - Ki67
+  - panCK
+  - S6
+  - SMA
+  - Vimentin
+  schulz_2018_p2:
+  - CD3
+  - CD44
+  - CD68
+  - CK14
+  - CK19
+  - CK5
+  - CK8-18
+  - DNA1
+  - DNA2
+  - Ecad
+  - FSP1
+  - HER2 (3B5)
+  - Histone H3
+  - Ki67
+  - panCK
+  - S6
+  - SMA
+  - Vimentin

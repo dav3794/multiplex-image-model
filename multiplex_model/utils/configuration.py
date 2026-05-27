@@ -2,7 +2,7 @@
 
 import csv
 import os
-from typing import Any
+from typing import Any, Literal
 
 from pydantic import BaseModel, ConfigDict, Field, field_validator
 from ruamel.yaml import YAML
@@ -243,6 +243,64 @@ class DataConfig(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
 
+def load_panel_config(config: dict[str, Any] | str) -> dict[str, Any]:
+    """Load panel config from mapping or YAML path and resolve marker stats.
+
+    Args:
+        config: Panel config mapping or path to YAML file.
+
+    Returns:
+        Resolved panel config mapping.
+    """
+    if isinstance(config, str):
+        config_path = os.path.expanduser(config)
+        if not os.path.exists(config_path):
+            raise ValueError(f"Panel config not found: {config_path}")
+
+        yaml = YAML(typ="safe")
+        with open(config_path, "r") as handle:
+            panel_config = yaml.load(handle)
+
+        panel_config_dir = os.path.dirname(os.path.abspath(config_path))
+    else:
+        panel_config = config
+        panel_config_dir = ""
+
+    marker_stats = panel_config.get("marker_stats")
+    if isinstance(marker_stats, str):
+        marker_stats_path = os.path.expanduser(marker_stats)
+        if not os.path.isabs(marker_stats_path):
+            marker_stats_path = os.path.join(panel_config_dir, marker_stats_path)
+        resolved_stats = load_normalization_stats_csv(marker_stats_path)
+        panel_config = panel_config.copy()
+        panel_config["marker_stats"] = resolved_stats
+
+    return panel_config
+
+
+def load_tokenizer_config(config: dict[str, Any] | str) -> dict[str, Any]:
+    """Load tokenizer config from mapping or YAML path.
+
+    Args:
+        config: Tokenizer mapping or path to YAML file.
+
+    Returns:
+        Tokenizer mapping.
+    """
+    if isinstance(config, str):
+        config_path = os.path.expanduser(config)
+        if not os.path.exists(config_path):
+            raise ValueError(f"Tokenizer config not found: {config_path}")
+
+        yaml = YAML(typ="safe")
+        with open(config_path, "r") as handle:
+            tokenizer_config = yaml.load(handle)
+    else:
+        tokenizer_config = config
+
+    return tokenizer_config
+
+
 def load_normalization_stats_csv(path: str) -> dict[str, dict[str, list[float]]]:
     csv_path = os.path.expanduser(path)
     if not os.path.exists(csv_path):
@@ -391,50 +449,42 @@ class TrainingConfig(BaseModel):
     @classmethod
     def validate_panel_config(cls, v):
         """Load panel config from YAML file and resolve marker stats if needed."""
-
-        if isinstance(v, str):
-            config_path = os.path.expanduser(v)
-            if not os.path.exists(config_path):
-                raise ValueError(f"Panel config not found: {config_path}")
-
-            yaml = YAML(typ="safe")
-            with open(config_path, "r") as handle:
-                panel_config = yaml.load(handle)
-
-            panel_config_dir = os.path.dirname(os.path.abspath(config_path))
-        
-        else:
-            panel_config = v
-            panel_config_dir = ""
-
-        marker_stats = panel_config.get("marker_stats")
-        if isinstance(marker_stats, str):
-            marker_stats_path = os.path.expanduser(marker_stats)
-            if not os.path.isabs(marker_stats_path):
-                marker_stats_path = os.path.join(panel_config_dir, marker_stats_path)
-            resolved_stats = load_normalization_stats_csv(marker_stats_path)
-            panel_config = panel_config.copy()
-            panel_config["marker_stats"] = resolved_stats
-
-        return panel_config
+        return load_panel_config(v)
 
     @field_validator("tokenizer_config", mode="before")
     @classmethod
     def validate_tokenizer_config(cls, v):
         """Load tokenizer config from YAML file."""
-
-        if isinstance(v, str):
-            config_path = os.path.expanduser(v)
-            if not os.path.exists(config_path):
-                raise ValueError(f"Tokenizer config not found: {config_path}")
-
-            yaml = YAML(typ="safe")
-            with open(config_path, "r") as handle:
-                tokenizer_config = yaml.load(handle)
-        else:
-            tokenizer_config = v
-
-        return tokenizer_config
+        return load_tokenizer_config(v)
 
 
     model_config = ConfigDict(extra="forbid")  # Raise error on unknown fields
+
+
+class FinetuneConfig(TrainingConfig):
+    """Configuration for finetuning from a pretrained checkpoint."""
+
+    pretrained_checkpoint: str = Field(
+        ..., description="Path to pretrained checkpoint (.pth)"
+    )
+    freeze_mode: Literal[
+        "freeze_all_but_new_markers",
+        "freeze_marker_agnostic",
+        "none",
+    ] = Field(
+        default="none",
+        description=(
+            "Freezing strategy: 'freeze_all_but_new_markers' freezes all parameters except "
+            "newly added marker embeddings, 'freeze_marker_agnostic' freezes marker-agnostic "
+            "encoder and decoder blocks, 'none' trains all parameters."
+        ),
+    )
+    updated_tokenizer_path: str | None = Field(
+        default=None,
+        description=(
+            "Output path for the updated tokenizer YAML. Defaults to checkpoints_dir "
+            "with run name if not provided."
+        ),
+    )
+
+    model_config = ConfigDict(extra="forbid")

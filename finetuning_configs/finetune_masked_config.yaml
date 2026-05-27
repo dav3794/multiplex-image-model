@@ -1,0 +1,57 @@
+encoder:
+    # marker-agnostic part
+    ma_layers_blocks: [4,]
+    ma_embedding_dims: [16,]
+    # pan-marker part
+    pm_layers_blocks: [4, 4, 4]
+    pm_embedding_dims: [192, 384, 768]
+
+    hyperkernel:
+      kernel_size: 1
+      padding: 0
+      stride: 1
+      use_bias: true
+
+decoder:
+  decoded_embed_dim: 512
+  num_blocks: 1
+
+  hyperkernel:
+      kernel_size: 1
+      padding: 0
+      stride: 1
+      use_bias: true
+
+# Data configuration
+panel_config: finetuning_configs/new_panels_config.yaml # NEW panel config
+tokenizer_config: configs/all_markers_tokenizer.yaml # OLD tokenizer
+input_image_size: [128, 128]
+num_workers: 8
+batch_size: 8
+
+# Training configuration
+device: cuda
+lr: 5e-4
+final_lr: 1e-6
+weight_decay: 0.0001
+gradient_accumulation_steps: 1
+epochs: 200
+frac_warmup_steps: 0.025
+min_channels_frac: 0.75
+spatial_masking_ratio: 0.6
+fully_masked_channels_max_frac: 0.5
+mask_patch_size: 8
+from_checkpoint: last
+checkpoints_dir: checkpoints
+save_checkpoint_freq: 10
+beta: 0.5
+
+# Finetuning configuration
+freeze_mode: freeze_all_but_new_markers
+pretrained_checkpoint_path: checkpoints/final_model-ImmuVis-603-beta-768-ma1.pth
+
+tags: []
+comet_project: ...
+comet_workspace: ...  # optional, can also be set via COMET_WORKSPACE env var
+comet_api_key: ...  # optional, can also be set via COMET_API_KEY env var
+run_name: ...

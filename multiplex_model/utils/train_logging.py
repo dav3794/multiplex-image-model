@@ -19,6 +19,49 @@ Image.MAX_IMAGE_PIXELS = None
 _experiment: comet_ml.Experiment | None = None
 
 
+def plot_image(
+    img: torch.Tensor,
+    channel_ids: torch.Tensor,
+    markers_names_map: dict[int, str],
+    ncols: int = 9,
+):
+    """Plot an input image channel-by-channel.
+
+    Args:
+        img (torch.Tensor): Input image [B, C, H, W]
+        channel_ids (torch.Tensor): Indices of the image channels [B, C]
+        markers_names_map (dict[int, str]): Channel index to marker name mapping
+        ncols (int, optional): Number of columns on the plot. Defaults to 9.
+
+    Returns:
+        matplotlib.figure.Figure: The generated figure
+    """
+    num_channels = img.shape[1]
+
+    nrows = ceil(num_channels / ncols)
+    fig, axs = plt.subplots(nrows, ncols, figsize=(ncols * 2, nrows * 2))
+    axs = np.atleast_1d(axs).reshape(nrows, ncols)
+
+    for i in range(nrows * ncols):
+        ax = axs.flat[i]
+        if i < num_channels:
+            channel_id = channel_ids[0, i].item()
+            marker_name = markers_names_map[channel_id]
+            ax.imshow(img[0, i].cpu().numpy(), cmap="CMRmap", vmin=0, vmax=1)
+            ax.set_title(marker_name)
+            ax.set_xticks([])
+            ax.set_yticks([])
+            for spine in ax.spines.values():
+                spine.set_edgecolor("black")
+                spine.set_linewidth(1)
+                spine.set_visible(True)
+        else:
+            ax.axis("off")
+
+    fig.tight_layout()
+    return fig
+
+
 def plot_reconstructs_with_uncertainty(
     orig_img: torch.Tensor,
     reconstructed_img: torch.Tensor,
