@@ -209,6 +209,14 @@ class DataConfig(BaseModel):
             "Normalization function to use (e.g., 'zscore_ds'); set to null to disable"
         ),
     )
+    unsupported_marker_behavior: Literal["error", "drop"] = Field(
+        default="error",
+        description=(
+            "Behavior when encountering unsupported markers. "
+            "'error': raises an error if unsupported markers are found. "
+            "'drop': drops unsupported markers and continues processing."
+        ),
+    )
     operation_order: list[str] = Field(
         default_factory=lambda: [
             "transform",

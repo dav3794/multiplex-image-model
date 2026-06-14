@@ -25,6 +25,7 @@ class MultiplexDataset(Dataset):
         panels_config: dict,
         split: str,
         marker_tokenizer: dict[str, int],
+        unsupported_marker_behavior: Literal["error", "drop"] = "error",
         transform=None,
         preprocessing_func: Literal["arcsinh", "log1p"] | None = "arcsinh",
         scaling_func: Literal["minmax", "percentile", "global_clip"] | None = "percentile",
@@ -53,6 +54,9 @@ class MultiplexDataset(Dataset):
             panels_config (dict): Configuration dictionary for panels.
             split (str): Name of the data split (e.g., 'train', 'val', 'test').
             marker_tokenizer (dict[str, int]): Tokenizer for marker names.
+            unsupported_marker_behavior (Literal['error', 'drop'], optional): Behavior when encountering unsupported markers. Defaults to 'error'.
+                `error`: Raises an error if unsupported markers are found.
+                `drop`: Drops unsupported markers and the corresponding channels and continues processing.
             transform (_type_, optional): Transform to be applied to the images. Defaults to None.
             preprocessing_func (Literal['arcsinh', 'log1p'], optional): Function to use for preprocessing. 
                 Skips preprocessing if None. Defaults to 'arcsinh'.
@@ -86,23 +90,44 @@ class MultiplexDataset(Dataset):
 
         self.ds_markers = panels_config["markers"]
 
-        self.channel_ids = {
-            dataset: torch.tensor(
-                [
-                    marker_tokenizer[marker]
-                    for marker in panels_config["markers"][dataset]
-                ],
-                dtype=torch.long,
-            )
-            for dataset in panels_config["datasets"]
-        }
+        # Load tokenized channel IDs and scan for markers not present in the tokenizer
+        self.channel_ids: dict[str, torch.Tensor] = {}
+        self.unsupported_markers_per_ds: dict[str, list[str]] = {}
 
+        for dataset in panels_config["datasets"]:
+            unsupported_markers = []
+            tokenized_markers = []
+            for marker in panels_config["markers"][dataset]:
+                marker_token = marker_tokenizer.get(marker, -1)  # Use -1 for unsupported markers
+                tokenized_markers.append(marker_token)
+                if marker_token == -1:
+                    unsupported_markers.append(marker)
+
+            self.channel_ids[dataset] = torch.tensor(tokenized_markers, dtype=torch.long)
+    
+            if len(unsupported_markers) > 0:
+                self.unsupported_markers_per_ds[dataset] = unsupported_markers
+
+
+        if self.unsupported_markers_per_ds:
+            msg = f"Unsupported markers found in the panels config (dataset: {{markers}}): {self.unsupported_markers_per_ds}."
+            if unsupported_marker_behavior == "error":
+                raise ValueError(
+                    f"{msg} Provided tokenizer does not recognize these markers. Set unsupported_marker_behavior='drop' to ignore them."
+                )
+
+            print(
+                f"{msg} These markers will be dropped from the dataset."
+            )
+
+        # Load image paths for each dataset
         img_path = panels_config["paths"][split]
         self.imgs = []  # tuples of (img_path, dataset)
         for dataset in panels_config["datasets"]:
             tiffs = glob(os.path.join(img_path, dataset, "imgs", f"*.{file_extension}"))
             self.imgs.extend([(tiff, dataset) for tiff in tiffs])
 
+        # Transformations declaration
         ds_percentiles = panels_config.get("clip_limits", None)
         ds_marker_stats = panels_config.get("marker_stats", None)
 
@@ -151,6 +176,15 @@ class MultiplexDataset(Dataset):
         self.read_file_func = (
             tifffile.imread if self.file_extension == "tiff" else np.load
         )
+    
+    def _prune_unsupported_markers(self, img, channel_ids, dataset) -> tuple[np.ndarray, torch.Tensor]:
+        """Remove channels corresponding to unsupported markers."""
+        if dataset in self.unsupported_markers_per_ds:
+            supported_channel_mask = channel_ids != -1  # Mask for supported channels
+            img = img[supported_channel_mask]
+            channel_ids = channel_ids[supported_channel_mask]
+
+        return img, channel_ids
 
     def __len__(self):
         return len(self.imgs)
@@ -161,6 +195,7 @@ class MultiplexDataset(Dataset):
         marker_names = self.ds_markers[dataset]
 
         img = self.read_file_func(img_path)
+        img, channel_ids = self._prune_unsupported_markers(img, channel_ids, dataset)
         img = self.pipeline(img, dataset=dataset, marker_names=marker_names)
 
         img = torch.tensor(img)
