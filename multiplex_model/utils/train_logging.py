@@ -1,5 +1,6 @@
 """Logging and visualization utilities for training and validation."""
 
+import os
 import re
 from datetime import datetime
 from io import BytesIO
@@ -295,6 +296,11 @@ def init_experiment(config: dict[str, Any]) -> None:
                 api_key=config.get("comet_api_key"),
             )
             run_name = f"ImVs-{version}"
+            # Parallel jobs race on the version query and can get the same number;
+            # the SLURM job id disambiguates so their checkpoints don't overwrite.
+            slurm_job_id = os.environ.get("SLURM_JOB_ID")
+            if slurm_job_id:
+                run_name = f"{run_name}-{slurm_job_id}"
         else:
             # Fallback to date-time as default run name
             run_name = datetime.now().strftime("%m%d_%H:%M:%S")
