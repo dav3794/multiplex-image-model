@@ -1,0 +1,15 @@
+eva_dir: null
+mim_dir: null
+repo_id: yandrewl/Eva
+conf: null
+panel_config: /storage_ssd_3/immuvis_celltyping/multiplex-image-model/configs/all_panels_config.yaml
+tokenizer_config: /storage_ssd_3/immuvis_celltyping/multiplex-image-model/configs/all_markers_tokenizer.yaml
+output_root: /storage_ssd_3/immucan/embeddings_eva/augmented
+datasets: [cords, danenberg]
+splits: [train, test]
+batch_size: 1
+num_workers: 4
+
+generation:
+  - family: eva
+    name: eva

@@ -1,0 +1,39 @@
+output_dir: /storage_ssd_3/immuvis_clinical/finetuned_results
+
+clinical_data:
+  path: /raid_encrypted/immucan/evaluation/predict_clinical/configs/immuvis/train_meta_table.csv
+
+datasets:
+  danenberg:
+    features: [ERBB2_pos, ERStatus, Grade, PAM50]
+  cords:
+    features: [DX.name, Grade, Relapse]
+
+preprocessing:
+  variants: [scaled]
+  rare_class_threshold: 0.05
+  seed: 42
+  feature_prefix: "f_"
+
+cross_validation:
+  n_folds: 10
+  seed: 42
+
+models:
+  - name: immuvis_603_full_pretrain
+    format: immuvis
+    path: /storage_ssd_3/immuvis_clinical/emb_603_full_pretrain
+    panels: [danenberg, cords]
+    img_path_col: img_path
+    batch_agg: mean
+    patch_agg: mean
+    variants: [scaled]
+
+  - name: immuvis_603_only_new_markers
+    format: immuvis
+    path: /storage_ssd_3/immuvis_clinical/emb_603_only_new_markers
+    panels: [danenberg, cords]
+    img_path_col: img_path
+    batch_agg: mean
+    patch_agg: mean
+    variants: [scaled]

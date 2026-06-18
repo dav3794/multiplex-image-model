@@ -1,0 +1,27 @@
+panel_config: /storage_ssd_3/immuvis_celltyping/multiplex-image-model/configs/all_panels_config.yaml
+tokenizer_config: ../moldoveanu/models/tokenizer-ImmuVis-F08-603-moldoveanu-only_new_markers.yaml
+datasets: [cords, danenberg]
+splits: [train, test]
+patch_size: 128
+batch_size: 1
+num_workers: 8
+save_every: 200
+
+generation:
+  - family: immuvis_finetuned
+    name: immuvis_603_full_pretrain
+    repo_path: ../finetuning-multiplex-image-model
+    checkpoint_path: ../moldoveanu/models/final_model-ImmuVis-F01-603-moldoveanu-full_pretain.pth
+    embeddings_path: /storage_ssd_3/immuvis_clinical/emb_603_full_pretrain
+    strict_loading: true
+    data_overrides:
+      file_extension: npy
+
+  - family: immuvis_finetuned
+    name: immuvis_603_only_new_markers
+    repo_path: ../finetuning-multiplex-image-model
+    checkpoint_path: ../moldoveanu/models/final_model-ImmuVis-F08-603-moldoveanu-only_new_markers.pth
+    embeddings_path: /storage_ssd_3/immuvis_clinical/emb_603_only_new_markers
+    strict_loading: true
+    data_overrides:
+      file_extension: npy

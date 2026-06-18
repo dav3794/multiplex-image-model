@@ -1,0 +1,48 @@
+panel_config: /storage_ssd_3/immuvis_celltyping/multiplex-image-model/configs/all_panels_config.yaml
+tokenizer_config: /storage_ssd_3/immuvis_celltyping/multiplex-image-model/configs/all_markers_tokenizer.yaml
+datasets: [cords, danenberg]
+splits: [train, test]
+patch_size: 128
+batch_size: 1
+num_workers: 8
+save_every: 200
+
+generation:
+  - family: immuvis_fork
+    name: kronecker_learnmask_gp
+    repo_path: ../kronecker-learnmask-multiplex-image-model
+    checkpoint_path: /raid_encrypted/immucan/models/gp/kronecker-learnable-mask/last_checkpoint-ImVs-34.pth
+    model_config_path: /raid_encrypted/immucan/models/gp/kronecker-learnable-mask/train_masked_learnmask_gp_config.yaml
+    embeddings_path: /storage_ssd_3/immuvis_clinical/kronecker_emb
+    strict_loading: true
+    data_overrides:
+      use_preprocessing: false
+      use_butterworth_filter: true
+      use_clip_normalization: true
+      file_extension: npy
+
+  - family: immuvis_fork
+    name: vit_lp
+    repo_path: ../kuba-multiplex-image-model
+    checkpoint_path: /raid_encrypted/immucan/embeddings_ViT/athena/ViT_200.pth
+    model_config_path: ../kuba-multiplex-image-model/configs/exp7c_vit_baseline.yaml
+    embeddings_path: /storage_ssd_3/immuvis_clinical/vit_lp_emb
+    strict_loading: true
+    data_overrides:
+      use_preprocessing: false
+      use_butterworth_filter: true
+      use_clip_normalization: true
+      file_extension: npy
+
+  - family: immuvis_kronos
+    name: kronos_immuvis_v2
+    repo_path: ../kuba-multiplex-image-model
+    checkpoint_path: /raid_encrypted/immucan/embeddings_ViT/athena/ImmunoDinoV2_200.pth
+    model_config_path: ../kuba-multiplex-image-model/configs/exp6a_immukronos_v2.yaml
+    embeddings_path: /storage_ssd_3/immuvis_clinical/kronos_immuvis_v2_emb
+    strict_loading: true
+    data_overrides:
+      use_preprocessing: false
+      use_butterworth_filter: true
+      use_clip_normalization: true
+      file_extension: npy

@@ -1,0 +1,31 @@
+output_dir: /storage_ssd_3/immuvis_clinical/603_clinical
+
+clinical_data:
+  path: /raid_encrypted/immucan/evaluation/predict_clinical/configs/immuvis/train_meta_table.csv
+
+datasets:
+  danenberg:
+    features: [DeathBreast, ERBB2_pos, ERStatus, Grade, PAM50]
+  cords:
+    features: [DX.name, Grade, Relapse]
+
+preprocessing:
+  variants: [scaled]
+  rare_class_threshold: 0.05
+  seed: 42
+  feature_prefix: "f_"
+
+cross_validation:
+  n_folds: 10
+  seed: 42
+
+models:
+  - name: ImmuVis-603-beta-768-ma1
+    format: immuvis
+    # path: /raid_encrypted/immucan/embeddings
+    path: /storage_ssd_3/immuvis_clinical/603_emb
+    panels: [danenberg, cords]
+    img_path_col: img_path
+    batch_agg: mean
+    patch_agg: mean
+    variants: [scaled]

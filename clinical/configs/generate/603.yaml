@@ -1,0 +1,19 @@
+models_path: /raid_encrypted/immucan/models
+embeddings_path: /storage_ssd_3/immuvis_clinical/603_emb
+panel_config: archive/all_panels_config_embeds.yaml
+tokenizer_config: /storage_ssd_3/immuvis_celltyping/multiplex-image-model/configs/all_markers_tokenizer.yaml
+repo_path: null
+data_config: null
+datasets: [cords, danenberg]
+splits: [train, test]
+patch_size: 128
+batch_size: 1
+num_workers: 8
+save_every: 200
+seed: 42
+
+generation:
+  - family: immuvis
+    name: ImmuVis-603-beta-768-ma1
+    strict_loading: true
+    file_extension: tiff

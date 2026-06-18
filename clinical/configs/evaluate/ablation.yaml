@@ -1,0 +1,118 @@
+output_dir: /storage_ssd_3/immuvis_clinical/ablation_results
+
+clinical_data:
+  path: /raid_encrypted/immucan/evaluation/predict_clinical/configs/immuvis/train_meta_table.csv
+
+datasets:
+  danenberg:
+    features: [ERBB2_pos, ERStatus, Grade, PAM50]
+  cords:
+    features: [DX.name, Grade, Relapse]
+
+preprocessing:
+  variants: [scaled]
+  rare_class_threshold: 0.05
+  seed: 42
+  feature_prefix: "f_"
+
+cross_validation:
+  n_folds: 10
+  seed: 42
+
+models:
+  - name: ImmuVis-600-beta-512-ma2
+    format: immuvis
+    path: /storage_ssd_3/immuvis_clinical/emb_600
+    panels: [danenberg, cords]
+    img_path_col: img_path
+    batch_agg: mean
+    patch_agg: mean
+    variants: [scaled]
+  - name: ImmuVis-601-beta-512-ma1
+    format: immuvis
+    path: /storage_ssd_3/immuvis_clinical/emb_601
+    panels: [danenberg, cords]
+    img_path_col: img_path
+    batch_agg: mean
+    patch_agg: mean
+    variants: [scaled]
+  - name: ImmuVis-602-beta-768-ma2
+    format: immuvis
+    path: /storage_ssd_3/immuvis_clinical/emb_602
+    panels: [danenberg, cords]
+    img_path_col: img_path
+    batch_agg: mean
+    patch_agg: mean
+    variants: [scaled]
+  - name: ImmuVis-603-beta-768-ma1
+    format: immuvis
+    path: /storage_ssd_3/immuvis_clinical/emb_603
+    panels: [danenberg, cords]
+    img_path_col: img_path
+    batch_agg: mean
+    patch_agg: mean
+    variants: [scaled]
+  - name: ImmuVis-606-beta-512-ma0
+    format: immuvis
+    path: /storage_ssd_3/immuvis_clinical/emb_606
+    panels: [danenberg, cords]
+    img_path_col: img_path
+    batch_agg: mean
+    patch_agg: mean
+    variants: [scaled]
+  - name: ImmuVis-607-beta-768-ma0
+    format: immuvis
+    path: /storage_ssd_3/immuvis_clinical/emb_607
+    panels: [danenberg, cords]
+    img_path_col: img_path
+    batch_agg: mean
+    patch_agg: mean
+    variants: [scaled]
+  - name: ImmuVis-619-beta-512-ma1-h3
+    format: immuvis
+    path: /storage_ssd_3/immuvis_clinical/emb_619
+    panels: [danenberg, cords]
+    img_path_col: img_path
+    batch_agg: mean
+    patch_agg: mean
+    variants: [scaled]
+  - name: ImmuVis-620-beta-768-ma1-h3
+    format: immuvis
+    path: /storage_ssd_3/immuvis_clinical/emb_620
+    panels: [danenberg, cords]
+    img_path_col: img_path
+    batch_agg: mean
+    patch_agg: mean
+    variants: [scaled]
+  - name: ImmuVis-625-beta-512-ma0-h3
+    format: immuvis
+    path: /storage_ssd_3/immuvis_clinical/emb_625
+    panels: [danenberg, cords]
+    img_path_col: img_path
+    batch_agg: mean
+    patch_agg: mean
+    variants: [scaled]
+  - name: ImmuVis-626-beta-768-ma0-h3
+    format: immuvis
+    path: /storage_ssd_3/immuvis_clinical/emb_626
+    panels: [danenberg, cords]
+    img_path_col: img_path
+    batch_agg: mean
+    patch_agg: mean
+    variants: [scaled]
+  - name: ImmuVis-627-beta-512-ma2-h3
+    format: immuvis
+    path: /storage_ssd_3/immuvis_clinical/emb_627
+    panels: [danenberg, cords]
+    img_path_col: img_path
+    batch_agg: mean
+    patch_agg: mean
+    variants: [scaled]
+  - name: ImmuVis-628-beta-768-ma2-h3
+    format: immuvis
+    path: /storage_ssd_3/immuvis_clinical/emb_628
+    panels: [danenberg, cords]
+    img_path_col: img_path
+    batch_agg: mean
+    patch_agg: mean
+    variants: [scaled]

@@ -1,0 +1,63 @@
+models_path: /raid_encrypted/immucan/models
+panel_config: archive/all_panels_config_embeds.yaml
+tokenizer_config: /storage_ssd_3/immuvis_celltyping/multiplex-image-model/configs/all_markers_tokenizer.yaml
+repo_path: null
+data_config: null
+datasets: [cords, danenberg]
+splits: [test, train]
+seed: 42
+file_extension: tiff
+patch_size: 128
+batch_size: 1
+num_workers: 8
+save_every: 200
+
+generation:
+  - family: immuvis
+    name: ImmuVis-600-beta-512-ma2
+    strict_loading: true
+    file_extension: tiff
+  - family: immuvis
+    name: ImmuVis-601-beta-512-ma1
+    strict_loading: true
+    file_extension: tiff
+  - family: immuvis
+    name: ImmuVis-602-beta-768-ma2
+    strict_loading: true
+    file_extension: tiff
+  - family: immuvis
+    name: ImmuVis-603-beta-768-ma1
+    strict_loading: true
+    file_extension: tiff
+  - family: immuvis
+    name: ImmuVis-606-beta-512-ma0
+    strict_loading: true
+    file_extension: tiff
+  - family: immuvis
+    name: ImmuVis-607-beta-768-ma0
+    strict_loading: true
+    file_extension: tiff
+  - family: immuvis
+    name: ImmuVis-619-beta-512-ma1-h3
+    strict_loading: true
+    file_extension: tiff
+  - family: immuvis
+    name: ImmuVis-620-beta-768-ma1-h3
+    strict_loading: true
+    file_extension: tiff
+  - family: immuvis
+    name: ImmuVis-625-beta-512-ma0-h3
+    strict_loading: true
+    file_extension: tiff
+  - family: immuvis
+    name: ImmuVis-626-beta-768-ma0-h3
+    strict_loading: true
+    file_extension: tiff
+  - family: immuvis
+    name: ImmuVis-627-beta-512-ma2-h3
+    strict_loading: true
+    file_extension: tiff
+  - family: immuvis
+    name: ImmuVis-628-beta-768-ma2-h3
+    strict_loading: true
+    file_extension: tiff

@@ -1,0 +1,12 @@
+checkpoint: /raid_encrypted/immucan/models/virtues_new_our_norm.safetensors
+repo_path: null
+base_config: null
+datasets_config: null
+marker_embeddings_dir: /raid_encrypted/immucan/virtues_esm_embeddings
+output_root: /storage_ssd_3/immucan/embeddings_virtues/augmented_our_norm
+datasets: [cords, danenberg]
+splits: [train, test]
+
+generation:
+  - family: virtues
+    name: virtues_new_our_norm

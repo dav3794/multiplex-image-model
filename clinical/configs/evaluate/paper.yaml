@@ -1,0 +1,56 @@
+output_dir: ./clinical/results
+
+clinical_data:
+  path: /raid_encrypted/immucan/evaluation/predict_clinical/configs/immuvis/train_meta_table.csv
+
+datasets:
+  danenberg:
+    # features: [DeathBreast, ERBB2_pos, ERStatus, Grade, PAM50]
+    features: [PAM50, Grade, ERStatus, ERBB2_pos]
+  cords:
+    features: [DX.name, Relapse, Grade]
+  # immucan-p1:
+  #   features: [tmb_class, simple_stage, simple_histology, death, CPS_score, TPS_score]
+  # immucan-p2:
+  #   features: [tmb_class, simple_stage, simple_histology, death, CPS_score, TPS_score]
+  # jackson-basel:
+  #   features: [grade, diseasestatus, clinical_type]
+
+preprocessing:
+  # variants: [standard, scaled, pca50, pca75, pca99, pca50w, pca75w, pca99w]
+  variants: [scaled]
+  rare_class_threshold: 0.05
+  seed: 42
+  feature_prefix: "f_"
+
+cross_validation:
+  n_folds: 10
+  seed: 42
+
+models:
+  - name: ImmuVis-603-beta-768-ma1
+    format: immuvis
+    path: /raid_encrypted/immucan/embeddings
+    panels: [danenberg, cords]
+    img_path_col: img_path
+    batch_agg: mean
+    patch_agg: mean
+    variants: [scaled]
+
+  - name: ImmuViT-610-beta-768-ma0
+    format: immuvis
+    path: /raid_encrypted/immucan/embeddings
+    panels: [danenberg, cords]
+    img_path_col: img_path
+    batch_agg: mean
+    patch_agg: mean
+    variants: [scaled]
+
+  - name: ImmuSwin-614-beta-768-ma1
+    format: immuvis
+    path: /raid_encrypted/immucan/embeddings
+    panels: [danenberg, cords]
+    img_path_col: img_path
+    batch_agg: mean
+    patch_agg: mean
+    variants: [scaled]

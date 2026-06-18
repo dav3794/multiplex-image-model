@@ -1,0 +1,36 @@
+models:
+  immuvis:
+    generate_func: models.immuvis.generate
+    description: >
+      ImmuVis models using MultiplexAutoencoder with MultiplexDataset.
+      Produces batch-based patch embeddings.
+
+  immuvis_fork:
+    generate_func: models.immuvis_fork.generate
+    description: >
+      Forked models using MultiplexAutoencoder with DatasetFromTIFF.
+      Used by kronecker_learnmask_gp, vit_lp.
+
+  immuvis_kronos:
+    generate_func: models.immuvis_kronos.generate
+    description: >
+      Kronos ImmuVis v2 model using ImmuvisDINO with DatasetFromTIFF.
+
+  virtues:
+    generate_func: models.virtues.generate
+    description: >
+      VIRTUES models using MultiplexVirtues with safetensors checkpoints.
+      Produces pre-split .npy/.csv per panel.
+
+  eva:
+    generate_func: models.eva.generate
+    description: >
+      Eva models using EvaMAE with GenePT marker embeddings.
+      Produces pre-split .npy/.csv per panel.
+
+  immuvis_finetuned:
+    generate_func: models.immuvis_finetuned.generate
+    description: >
+      Fine-tuned ImmuVis models loaded via MultiplexAutoencoder.load_from_checkpoint.
+      Architecture config is read from the checkpoint itself, so model_config_path
+      is not required. Uses the finetuning-multiplex-image-model repo.
