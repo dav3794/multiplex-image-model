@@ -152,7 +152,8 @@ def _freeze_marker_agnostic_backbone(model: MultiplexAutoencoder) -> None:
 
 def _save_tokenizer(tokenizer: dict[str, int], output_path: str) -> None:
     output_dir = os.path.dirname(output_path)
-    os.makedirs(output_dir, exist_ok=True)
+    if output_dir:
+        os.makedirs(output_dir, exist_ok=True)
     yaml = YAML()
     with open(output_path, "w") as handle:
         yaml.dump(tokenizer, handle)
