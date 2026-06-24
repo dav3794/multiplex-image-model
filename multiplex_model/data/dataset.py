@@ -177,14 +177,23 @@ class MultiplexDataset(Dataset):
             tifffile.imread if self.file_extension == "tiff" else np.load
         )
     
-    def _prune_unsupported_markers(self, img, channel_ids, dataset) -> tuple[np.ndarray, torch.Tensor]:
+    def _prune_unsupported_markers(
+        self,
+        img,
+        channel_ids,
+        marker_names,
+        dataset,
+    ) -> tuple[np.ndarray, torch.Tensor, list[str]]:
         """Remove channels corresponding to unsupported markers."""
         if dataset in self.unsupported_markers_per_ds:
             supported_channel_mask = channel_ids != -1  # Mask for supported channels
             img = img[supported_channel_mask]
             channel_ids = channel_ids[supported_channel_mask]
+            marker_names = [
+                marker for marker, is_supported in zip(marker_names, supported_channel_mask) if is_supported
+            ]
 
-        return img, channel_ids
+        return img, channel_ids, marker_names
 
     def __len__(self):
         return len(self.imgs)
@@ -195,7 +204,9 @@ class MultiplexDataset(Dataset):
         marker_names = self.ds_markers[dataset]
 
         img = self.read_file_func(img_path)
-        img, channel_ids = self._prune_unsupported_markers(img, channel_ids, dataset)
+        img, channel_ids, marker_names = self._prune_unsupported_markers(
+            img, channel_ids, marker_names, dataset
+        )
         img = self.pipeline(img, dataset=dataset, marker_names=marker_names)
 
         img = torch.tensor(img)
