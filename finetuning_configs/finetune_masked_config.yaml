@@ -48,8 +48,7 @@ beta: 0.5
 
 # Finetuning configuration
 freeze_mode: freeze_all_but_new_markers
-pretrained_checkpoint_path: checkpoints/final_model-ImmuVis-603-beta-768-ma1.pth
-
+pretrained_checkpoint: checkpoints/final_model-ImmuVis-603-beta-768-ma1.pth
 tags: []
 comet_project: ...
 comet_workspace: ...  # optional, can also be set via COMET_WORKSPACE env var
