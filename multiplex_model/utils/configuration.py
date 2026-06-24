@@ -416,6 +416,14 @@ class TrainingConfig(BaseModel):
     decoder_config: DecoderConfig = Field(
         ..., description="Decoder configuration", alias="decoder"
     )
+    share_hyperkernel_coeff: bool = Field(
+        default=False,
+        description=(
+            "Whether to share the low-rank per-marker coefficient table "
+            "(hyperkernel_coeff) between the encoder and decoder hyperkernels. "
+            "Requires both hyperkernels to use low_rank=True with matching rank."
+        ),
+    )
 
     # Checkpoint parameters
     from_checkpoint: str | None = Field(

@@ -364,6 +364,7 @@ if __name__ == "__main__":
         "num_channels": num_channels,
         "encoder_config": config.encoder_config.model_dump(),
         "decoder_config": config.decoder_config.model_dump(),
+        "share_hyperkernel_coeff": config.share_hyperkernel_coeff,
     }
 
     # Load checkpoint if specified

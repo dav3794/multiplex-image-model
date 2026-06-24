@@ -405,6 +405,7 @@ class MultiplexAutoencoder(nn.Module):
         num_channels: int,
         encoder_config: dict,
         decoder_config: dict,
+        share_hyperkernel_coeff: bool = False,
     ):
         """Initialize the Multiplex Autoencoder model.
 
@@ -412,16 +413,23 @@ class MultiplexAutoencoder(nn.Module):
             num_channels (int): Number of all possible channels/markers.
             encoder_config (dict): Configuration for the encoder.
             decoder_config (dict): Configuration for the decoder.
+            share_hyperkernel_coeff (bool, optional): If True, tie the per-marker
+                low-rank coefficient table (`hyperkernel_coeff`) of the decoder
+                hyperkernel to the encoder hyperkernel, so a single per-marker code
+                drives both encoding and decoding. Requires both hyperkernels to use
+                low_rank=True with matching rank. Defaults to False.
         """
         super().__init__()
         self._architecture_config = {
             "num_channels": num_channels,
             "encoder_config": copy.deepcopy(encoder_config),
             "decoder_config": copy.deepcopy(decoder_config),
+            "share_hyperkernel_coeff": share_hyperkernel_coeff,
         }
 
         self.latent_dim = encoder_config["pm_embedding_dims"][-1]
         self.num_channels = num_channels
+        self.share_hyperkernel_coeff = share_hyperkernel_coeff
 
         self.encoder = MultiplexImageEncoder(
             num_channels=self.num_channels, **encoder_config
@@ -440,6 +448,29 @@ class MultiplexAutoencoder(nn.Module):
             num_channels=self.num_channels,
             **decoder_config,
         )
+
+        if share_hyperkernel_coeff:
+            self._tie_hyperkernel_coeff()
+
+    def _tie_hyperkernel_coeff(self) -> None:
+        """Tie the decoder hyperkernel's per-marker coefficients to the encoder's.
+
+        Both hyperkernels must be built with low_rank=True and the same rank, so that
+        the shared `hyperkernel_coeff` table (num_channels x rank) is compatible.
+        """
+        encoder_hk = self.encoder.hyperkernel
+        decoder_hk = self.decoder.channel_embed
+        if not (encoder_hk.low_rank and decoder_hk.low_rank):
+            raise ValueError(
+                "share_hyperkernel_coeff requires both encoder and decoder hyperkernels "
+                "to use low_rank=True."
+            )
+        if encoder_hk.rank != decoder_hk.rank:
+            raise ValueError(
+                "share_hyperkernel_coeff requires matching ranks for the encoder "
+                f"({encoder_hk.rank}) and decoder ({decoder_hk.rank}) hyperkernels."
+            )
+        decoder_hk.hyperkernel_coeff = encoder_hk.hyperkernel_coeff
 
     def get_architecture_config(self, by_alias: bool = False) -> dict:
         """Return the model architecture configuration.
