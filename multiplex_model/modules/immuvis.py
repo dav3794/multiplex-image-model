@@ -20,6 +20,8 @@ class Hyperkernel(nn.Module):
         padding: int = 0,
         stride: int = 1,
         use_bias: bool = True,
+        low_rank: bool = False,
+        rank: int | None = None,
     ):
         """Initialize the Hyperkernel model
 
@@ -32,6 +34,13 @@ class Hyperkernel(nn.Module):
             padding (int, optional): Padding for the conv layer. Defaults to 1.
             stride (int, optional): Stride for the conv layer. Defaults to 1.
             use_bias (bool, optional): Whether to use bias in the conv layer. Defaults to True.
+            low_rank (bool, optional): If True, factorize the per-marker weight table as a
+                shared basis combined with per-marker coefficients
+                (W_m = sum_r coeff[m, r] * basis[r]), reducing parameters from
+                num_channels * model_dim to rank * model_dim + num_channels * rank.
+                Defaults to False.
+            rank (int, optional): Number of shared basis components. Required when
+                low_rank is True. Defaults to None.
         """
         super(Hyperkernel, self).__init__()
         self.embedding_dim = embedding_dim
@@ -49,7 +58,24 @@ class Hyperkernel(nn.Module):
 
         self.out_dim = self.embedding_dim * self.kernel_size**2
         self.model_dim = self.out_dim * self.input_dim
-        self.hyperkernel_weights = nn.Embedding(num_channels, self.model_dim)
+
+        self.low_rank = low_rank
+        if low_rank:
+            if rank is None or rank <= 0:
+                raise ValueError(
+                    "`rank` must be a positive integer when `low_rank` is True."
+                )
+            self.rank = rank
+            # Per-marker coefficients over a shared basis of weight matrices.
+            self.hyperkernel_coeff = nn.Embedding(num_channels, rank)
+            self.hyperkernel_basis = nn.Parameter(torch.empty(rank, self.model_dim))
+            # Init so that initial per-marker weights match the std of the
+            # full-rank nn.Embedding (~N(0, 1)) elementwise.
+            nn.init.normal_(self.hyperkernel_coeff.weight)
+            nn.init.normal_(self.hyperkernel_basis, std=rank**-0.5)
+        else:
+            self.rank = None
+            self.hyperkernel_weights = nn.Embedding(num_channels, self.model_dim)
 
         self.use_bias = use_bias
         if use_bias:
@@ -80,7 +106,11 @@ class Hyperkernel(nn.Module):
         CI = C * I
         spatial_shape = x.shape[-2:]
 
-        weights = self.hyperkernel_weights(indices).to(x.dtype)  # (B, C, I*O)
+        if self.low_rank:
+            coeff = self.hyperkernel_coeff(indices).to(x.dtype)  # (B, C, R)
+            weights = coeff @ self.hyperkernel_basis.to(x.dtype)  # (B, C, I*O)
+        else:
+            weights = self.hyperkernel_weights(indices).to(x.dtype)  # (B, C, I*O)
         weights = weights.reshape(B, C, I, O)
 
         if self.layer_type == "conv":

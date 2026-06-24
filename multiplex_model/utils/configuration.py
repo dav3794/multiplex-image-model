@@ -51,6 +51,25 @@ class HyperkernelConfig(BaseModel):
     padding: int = Field(0, ge=0, description="Padding for convolution")
     stride: int = Field(1, gt=0, description="Stride for convolution")
     use_bias: bool = Field(True, description="Whether to use bias in the hyperkernel")
+    low_rank: bool = Field(
+        False,
+        description=(
+            "Whether to factorize the per-marker weight table as a shared basis "
+            "with per-marker coefficients (W_m = sum_r coeff[m, r] * basis[r])"
+        ),
+    )
+    rank: int | None = Field(
+        None,
+        gt=0,
+        description="Number of shared basis components; required when low_rank is True",
+    )
+
+    @field_validator("rank")
+    @classmethod
+    def validate_rank(cls, v: int | None, info) -> int | None:
+        if info.data.get("low_rank") and v is None:
+            raise ValueError("`rank` must be set when `low_rank` is True")
+        return v
 
     model_config = ConfigDict(extra="forbid")
 

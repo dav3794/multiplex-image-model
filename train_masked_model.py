@@ -169,8 +169,14 @@ def test_masked(
     running_loss = 0.0
     running_mae = 0.0
     running_mse = 0.0
+    num_batches = len(test_dataloader)
+    if num_batches == 0:
+        print(f"Warning: test_dataloader is empty; skipping validation for epoch {epoch}.")
+        return
+
+    num_plots = min(num_plots, num_batches)
     plot_indices = np.random.choice(
-        np.arange(len(test_dataloader)), size=num_plots, replace=False
+        np.arange(num_batches), size=num_plots, replace=False
     )
     plot_indices = set(plot_indices)
 
