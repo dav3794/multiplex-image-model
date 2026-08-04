@@ -356,6 +356,7 @@ def log_training_metrics(
     mae: float,
     mse: float,
     step: int | None = None,
+    extra_metrics: dict[str, float] | None = None,
 ) -> None:
     """Log training metrics to Comet.ml.
 
@@ -367,6 +368,8 @@ def log_training_metrics(
         mae (float): Mean absolute error
         mse (float): Mean squared error
         step (int | None): Step number for logging
+        extra_metrics (dict[str, float] | None): Additional metrics to log under the
+            "train/" namespace (e.g. {"dino": ..., "koleo": ...})
     """
     if _experiment is None:
         return
@@ -379,6 +382,10 @@ def log_training_metrics(
         "train/mae": mae,
         "train/mse": mse,
     }
+    if extra_metrics:
+        metrics.update(
+            {f"train/{name}": value for name, value in extra_metrics.items()}
+        )
     _experiment.log_metrics(metrics, step=step)
 
 

@@ -3,6 +3,8 @@
 # Configuration
 from .configuration import (
     DecoderConfig,
+    DINOHeadConfig,
+    DINOTrainingConfig,
     EncoderConfig,
     HyperkernelConfig,
     ModuleConfig,
@@ -38,6 +40,8 @@ __all__ = [
     "ModuleConfig",
     "EncoderConfig",
     "DecoderConfig",
+    "DINOHeadConfig",
+    "DINOTrainingConfig",
     "FinetuneConfig",
     "TrainingConfig",
     # Masking

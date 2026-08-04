@@ -6,6 +6,7 @@ import torch.nn as nn
 import torch.nn.functional as F
 
 from .base_modules import Block, Encoder, Identity, LayerNorm
+from .dino import DINOHead
 from .registry import resolve_block_class, resolve_encoder_class
 
 
@@ -185,6 +186,8 @@ class MultiplexImageEncoder(nn.Module):
         use_mask_token: bool = False,
         mask_token_init: float = 0.0,
         encoder_type: str | type[Encoder] | dict = "convnext",
+        dino_head: bool = False,
+        dino_head_config: dict | None = None,
     ):
         """Initialize the Multiplex Image Encoder.
 
@@ -203,6 +206,9 @@ class MultiplexImageEncoder(nn.Module):
                 For ConvNeXtEncoder, module_parameters can include 'block_parameters' dict with ConvNextBlock parameters
                 (e.g., kernel_size, padding, inter_dim).
                 Defaults to "convnext".
+            dino_head (bool, optional): Whether to include a projection head after the encoder. Defaults to False.
+            dino_head_config (dict, optional): Keyword arguments for the DINOHead (e.g. out_dim,
+                hidden_dim, bottleneck_dim). Only used when dino_head is True. Defaults to None.
         """
         super().__init__()
 
@@ -253,11 +259,18 @@ class MultiplexImageEncoder(nn.Module):
             **encoder_kwargs,
         )
 
+        latent_dim = pm_embedding_dims[-1]
         self.latent_norm = (
-            LayerNorm(pm_embedding_dims[-1], data_format="channels_first")
+            LayerNorm(latent_dim, data_format="channels_first")
             if use_latent_norm
             else nn.Identity()
         )
+
+        self.use_dino_head = dino_head
+        if dino_head:
+            # LayerNorm applied to the global-average-pooled latent before the DINO head.
+            self.post_pool_norm = nn.LayerNorm(latent_dim)
+            self.dino_head = DINOHead(in_dim=latent_dim, **(dino_head_config or {}))
 
     def forward(
         self,
@@ -265,6 +278,7 @@ class MultiplexImageEncoder(nn.Module):
         encoded_indices: torch.Tensor,
         spatial_mask: torch.Tensor | None = None,
         return_features: bool = False,
+        return_dino_proj: bool = False,
     ) -> dict:
         """Forward pass of the encoder.
 
@@ -273,6 +287,8 @@ class MultiplexImageEncoder(nn.Module):
             encoded_indices (torch.Tensor): Indices of the markers in channels tensor with shape [B, C].
             spatial_mask (torch.Tensor, optional): Boolean mask for masked pixels [B, C, H, W].
             return_features (bool, optional): If True, returns the features after each block. Defaults to False.
+            return_dino_proj (bool, optional): If True, returns the output of the projection head on global average pooled
+                latent. Defaults to False.
 
         Returns:
             dict: A dictionary containing the output tensor and optionally the features.
@@ -304,6 +320,14 @@ class MultiplexImageEncoder(nn.Module):
         outputs["output"] = x
         if return_features:
             outputs["features"] = features
+
+        if return_dino_proj:
+            if not self.use_dino_head:
+                raise ValueError(
+                    "return_dino_proj is True, but the encoder was not initialized with dino_head=True."
+                )
+            pooled = self.post_pool_norm(x.mean(dim=[2, 3]))
+            outputs["cls"] = self.dino_head(pooled)
 
         return outputs
 
@@ -534,6 +558,7 @@ class MultiplexAutoencoder(nn.Module):
         encoded_indices: torch.Tensor,
         spatial_mask: torch.Tensor | None = None,
         return_features: bool = False,
+        return_dino_proj: bool = False,
     ) -> dict:
         """Encode the input images using the encoder.
 
@@ -542,6 +567,8 @@ class MultiplexAutoencoder(nn.Module):
             encoded_indices (torch.Tensor): Indices of the markers in channels.
             spatial_mask (torch.Tensor, optional): Boolean mask for masked pixels [B, C, H, W].
             return_features (bool, optional): If True, returns the features after encoding. Defaults to False.
+            return_dino_proj (bool, optional): If True, returns the output of the projection head on global average pooled
+                latent. Defaults to False.
 
         Returns:
             dict: A dictionary containing the encoded images tensor (under 'output') and optionally the features.
@@ -551,12 +578,9 @@ class MultiplexAutoencoder(nn.Module):
             encoded_indices,
             spatial_mask=spatial_mask,
             return_features=return_features,
+            return_dino_proj=return_dino_proj,
         )
-        outputs = {"output": encoding_output["output"]}
-
-        if return_features:
-            outputs["features"] = encoding_output["features"]
-        return outputs
+        return encoding_output
 
     def decode(
         self,
@@ -582,6 +606,7 @@ class MultiplexAutoencoder(nn.Module):
         decoded_indices: torch.Tensor,
         spatial_mask: torch.Tensor | None = None,
         return_features: bool = False,
+        return_dino_proj: bool = False,
     ) -> dict:
         """Forward pass of the Multiplex Autoencoder.
 
@@ -592,6 +617,9 @@ class MultiplexAutoencoder(nn.Module):
             decoded_indices (torch.Tensor): Indices of the markers in channels
                 for decoding.
             spatial_mask (torch.Tensor, optional): Boolean mask for masked pixels [B, C, H, W].
+            return_features (bool, optional): If True, returns the features after encoding. Defaults to False.
+            return_dino_proj (bool, optional): If True, returns the output of the projection head on global average pooled
+                latent. Defaults to False.
 
         Returns:
             dict: A dictionary containing the reconstructed images tensor (under 'output') and optionally the features.
@@ -601,10 +629,13 @@ class MultiplexAutoencoder(nn.Module):
             encoded_indices,
             spatial_mask=spatial_mask,
             return_features=return_features,
+            return_dino_proj=return_dino_proj,
         )
         x = encoding_output["output"]
         x = self.decode(x, decoded_indices)
         outputs = {"output": x}
         if return_features:
             outputs["features"] = encoding_output["features"]
+        if return_dino_proj and "cls" in encoding_output:
+            outputs["cls"] = encoding_output["cls"]
         return outputs

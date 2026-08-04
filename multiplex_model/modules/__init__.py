@@ -92,6 +92,9 @@ from .immuvis import (
     MultiplexImageEncoder,
 )
 
+# DINO projection head
+from .dino import DINOHead
+
 
 __all__ = [
     # Registry system
@@ -124,4 +127,6 @@ __all__ = [
     "MultiplexImageEncoder",
     "MultiplexImageDecoder",
     "MultiplexAutoencoder",
+    # DINO projection head
+    "DINOHead",
 ]

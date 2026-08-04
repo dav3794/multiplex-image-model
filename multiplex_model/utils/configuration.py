@@ -74,6 +74,30 @@ class HyperkernelConfig(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
 
+class DINOHeadConfig(BaseModel):
+    """Configuration for the DINO projection head."""
+
+    out_dim: int = Field(
+        default=65536, gt=0, description="Number of prototypes (head output dimension)"
+    )
+    hidden_dim: int = Field(
+        default=2048, gt=0, description="Hidden dimension of the head MLP"
+    )
+    bottleneck_dim: int = Field(
+        default=256, gt=0, description="Dimension of the L2-normalized bottleneck"
+    )
+    n_layers: int = Field(default=3, gt=0, description="Number of MLP layers (>=1)")
+    use_bn: bool = Field(
+        default=False, description="Whether to use BatchNorm between MLP layers"
+    )
+    norm_last_layer: bool = Field(
+        default=True,
+        description="Whether to freeze the weight-norm magnitude of the last layer",
+    )
+
+    model_config = ConfigDict(extra="forbid")
+
+
 class EncoderConfig(BaseModel):
     """Configuration for MultiplexImageEncoder."""
 
@@ -110,6 +134,15 @@ class EncoderConfig(BaseModel):
             "Encoder type to use for marker-agnostic and pan-marker encoders. "
             "Can be a string (e.g., 'convnext') or a dict with 'type' and 'module_parameters'."
         ),
+    )
+
+    dino_head: bool = Field(
+        default=False,
+        description="Whether to attach a DINO projection head on the pooled latent",
+    )
+    dino_head_config: DINOHeadConfig | None = Field(
+        default=None,
+        description="Configuration for the DINO head; only used when dino_head is True",
     )
 
     @field_validator("ma_layers_blocks", "pm_layers_blocks")
@@ -352,7 +385,7 @@ def load_normalization_stats_csv(path: str) -> dict[str, dict[str, list[float]]]
             std = float(row["std"])
             stats.setdefault(dataset, {})[marker] = [mean, std]
 
-    return stats   
+    return stats
 
 
 class TrainingConfig(BaseModel):
@@ -379,7 +412,8 @@ class TrainingConfig(BaseModel):
         ..., description="Panel configuration data or path to panel configuration file"
     )
     tokenizer_config: dict[str, Any] | str = Field(
-        ..., description="Tokenizer configuration data or path to tokenizer configuration file"
+        ...,
+        description="Tokenizer configuration data or path to tokenizer configuration file",
     )
 
     # Training parameters
@@ -479,7 +513,6 @@ class TrainingConfig(BaseModel):
 
         return True
 
-
     @field_validator("panel_config", mode="before")
     @classmethod
     def validate_panel_config(cls, v):
@@ -491,7 +524,6 @@ class TrainingConfig(BaseModel):
     def validate_tokenizer_config(cls, v):
         """Load tokenizer config from YAML file."""
         return load_tokenizer_config(v)
-
 
     model_config = ConfigDict(extra="forbid")  # Raise error on unknown fields
 
@@ -520,6 +552,62 @@ class FinetuneConfig(TrainingConfig):
             "Output path for the updated tokenizer YAML. Defaults to checkpoints_dir "
             "with run name if not provided."
         ),
+    )
+
+    model_config = ConfigDict(extra="forbid")
+
+
+class DINOTrainingConfig(TrainingConfig):
+    """Configuration for masked reconstruction + DINOv2 self-distillation training."""
+
+    num_global_views: int = Field(
+        default=2, gt=1, description="Number of augmented (masked) views per image"
+    )
+
+    # Loss weights
+    recon_loss_weight: float = Field(
+        default=1.0, ge=0, description="Weight for the Beta-NLL reconstruction loss"
+    )
+    dino_loss_weight: float = Field(
+        default=1.0, ge=0, description="Weight for the DINO self-distillation loss"
+    )
+    koleo_loss_weight: float = Field(
+        default=0.1, ge=0, description="Weight for the KoLeo regularization loss"
+    )
+
+    # DINO temperatures and centering
+    student_temp: float = Field(
+        default=0.1, gt=0, description="Student softmax temperature"
+    )
+    teacher_temp: float = Field(
+        default=0.04, gt=0, description="Final teacher softmax temperature"
+    )
+    warmup_teacher_temp: float = Field(
+        default=0.04, gt=0, description="Initial teacher temperature during warmup"
+    )
+    warmup_teacher_temp_epochs: int = Field(
+        default=0,
+        ge=0,
+        description="Number of epochs to warm up the teacher temperature",
+    )
+    center_momentum: float = Field(
+        default=0.9,
+        ge=0,
+        le=1,
+        description="EMA momentum for the teacher output center",
+    )
+
+    # Teacher EMA and last-layer freezing
+    momentum_teacher: float = Field(
+        default=0.996,
+        ge=0,
+        le=1,
+        description="Base EMA momentum for the teacher (cosine-annealed to 1.0)",
+    )
+    freeze_last_layer_epochs: int = Field(
+        default=1,
+        ge=0,
+        description="Number of initial epochs to freeze the DINO head's last layer",
     )
 
     model_config = ConfigDict(extra="forbid")

@@ -1,0 +1,93 @@
+encoder:
+    # marker-agnostic part
+    ma_layers_blocks: [4,]
+    ma_embedding_dims: [16,]
+    # pan-marker part
+    pm_layers_blocks: [4, 4, 4]
+    pm_embedding_dims: [192, 384, 768]
+
+    hyperkernel:
+      kernel_size: 1
+      padding: 0
+      stride: 1
+      use_bias: true
+      low_rank: false
+      rank: null
+
+    # DINO projection head on the global-average-pooled latent (required for DINO training)
+    dino_head: true
+    dino_head_config:
+      out_dim: 65536
+      hidden_dim: 2048
+      bottleneck_dim: 256
+      n_layers: 3
+      use_bn: false
+      norm_last_layer: true
+
+decoder:
+  decoded_embed_dim: 512
+  num_blocks: 1
+
+  hyperkernel:
+      kernel_size: 1
+      padding: 0
+      stride: 1
+      use_bias: true
+      low_rank: false
+      rank: null
+
+# Data configuration
+panel_config: configs/all_panels_config.yaml
+tokenizer_config: configs/all_markers_tokenizer.yaml
+input_image_size: [128, 128]
+num_workers: 4
+batch_size: 8
+
+data_config:
+  preprocessing_func: null
+  scaling_func: percentile
+  denoising_func: butterworth
+  normalization_func: null
+  operation_order: [transform, denoising, scaling]
+  file_extension: npy
+  preprocessing_kwargs: {}
+  denoising_kwargs: {}
+  scaling_kwargs: {}
+  normalization_kwargs: {}
+
+# Training configuration
+device: cuda
+lr: 5e-4
+final_lr: 1e-5
+weight_decay: 0.0001
+gradient_accumulation_steps: 1
+epochs: 10
+frac_warmup_steps: 0.1
+min_channels_frac: 0.75
+spatial_masking_ratio: 0.6
+fully_masked_channels_max_frac: 0.5
+mask_patch_size: 8
+from_checkpoint: null
+checkpoints_dir: checkpoints
+save_checkpoint_freq: 5
+beta: 0.5
+
+# DINOv2 self-distillation configuration
+num_global_views: 2
+recon_loss_weight: 1.0
+dino_loss_weight: 1.0
+koleo_loss_weight: 0.1
+student_temp: 0.1
+teacher_temp: 0.04
+warmup_teacher_temp: 0.04
+warmup_teacher_temp_epochs: 0
+center_momentum: 0.9
+momentum_teacher: 0.996
+freeze_last_layer_epochs: 1
+
+# Comet.ml logging configuration
+tags: ["dino"]
+comet_project: immuvis
+comet_workspace: null  # optional, can also be set via COMET_WORKSPACE env var
+comet_api_key: null  # set via COMET_API_KEY env var
+run_name: 'ImmuVis-DINO-001'
