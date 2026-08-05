@@ -8,15 +8,14 @@ from cv2 import medianBlur, GaussianBlur
 from skimage.filters import butterworth
 from torchvision.transforms.functional import crop
 
+
 class ImageFunc(ABC):
     """Abstract base class for image transforms."""
 
     available_funcs = set()
 
     def __init__(self, func_name: str, **kwargs):
-        assert (
-            func_name in self.available_funcs
-        ), (
+        assert func_name in self.available_funcs, (
             f"Function '{func_name}' is not supported. "
             f"Available functions: {self.available_funcs}"
         )
@@ -26,6 +25,7 @@ class ImageFunc(ABC):
 
     def __call__(self, img, **img_kwargs):
         return self._func(img, **img_kwargs, **self.func_kwargs)
+
 
 class OutlierPruning(ImageFunc):
     """Class for outlier removal"""
@@ -169,7 +169,9 @@ class Pipeline:
 
         for name, transform in self.transforms.items():
             if name not in self.operation_order and not isinstance(transform, Identity):
-                warnings.warn(f"Transform '{name}' is passed but is not in the operation order and will not be applied.")
+                warnings.warn(
+                    f"Transform '{name}' is passed but is not in the operation order and will not be applied."
+                )
 
     def __call__(self, img, dataset=None, marker_names=None):
         for operation in self.operation_order:

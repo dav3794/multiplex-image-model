@@ -19,6 +19,7 @@ from .transforms import (
     Identity,
 )
 
+
 class MultiplexDataset(Dataset):
     def __init__(
         self,
@@ -28,9 +29,11 @@ class MultiplexDataset(Dataset):
         unsupported_marker_behavior: Literal["error", "drop"] = "error",
         transform=None,
         preprocessing_func: Literal["arcsinh", "log1p"] | None = "arcsinh",
-        scaling_func: Literal["minmax", "percentile", "global_clip"] | None = "percentile",
+        scaling_func: Literal["minmax", "percentile", "global_clip"]
+        | None = "percentile",
         global_scaling_bound: float = 5.0,
-        denoising_func: Literal["median", "gaussian", "butterworth"] | None = "butterworth",
+        denoising_func: Literal["median", "gaussian", "butterworth"]
+        | None = "butterworth",
         normalization_func: Literal["zscore_ds"] | None = None,
         outlier_pruning_func: Literal["percentile_clip"] | None = None,
         operation_order: list[str] = [
@@ -45,7 +48,6 @@ class MultiplexDataset(Dataset):
         scaling_kwargs: dict = {},
         normalization_kwargs: dict = {},
         outlier_pruning_kwargs: dict = {},
-
     ):
         """Dataset for loading multiplex images from multiple panels.
         The order of operations is given by `operation_order`.
@@ -58,9 +60,9 @@ class MultiplexDataset(Dataset):
                 `error`: Raises an error if unsupported markers are found.
                 `drop`: Drops unsupported markers and the corresponding channels and continues processing.
             transform (_type_, optional): Transform to be applied to the images. Defaults to None.
-            preprocessing_func (Literal['arcsinh', 'log1p'], optional): Function to use for preprocessing. 
+            preprocessing_func (Literal['arcsinh', 'log1p'], optional): Function to use for preprocessing.
                 Skips preprocessing if None. Defaults to 'arcsinh'.
-            denoising_func (Literal['median', 'gaussian', 'butterworth'], optional): Function to use for denoising. 
+            denoising_func (Literal['median', 'gaussian', 'butterworth'], optional): Function to use for denoising.
             Skips denoising if None. Defaults to 'butterworth'.
             scaling_func (Literal['minmax', 'percentile', 'global_clip'], optional): Function to use for scaling. Skips scaling if None. Defaults to 'percentile'.
             global_scaling_bound (float, optional): Global upper bound for scaling if `global_clip` is chosen as `scaling_func`. Defaults to 5.0.
@@ -98,16 +100,19 @@ class MultiplexDataset(Dataset):
             unsupported_markers = []
             tokenized_markers = []
             for marker in panels_config["markers"][dataset]:
-                marker_token = marker_tokenizer.get(marker, -1)  # Use -1 for unsupported markers
+                marker_token = marker_tokenizer.get(
+                    marker, -1
+                )  # Use -1 for unsupported markers
                 tokenized_markers.append(marker_token)
                 if marker_token == -1:
                     unsupported_markers.append(marker)
 
-            self.channel_ids[dataset] = torch.tensor(tokenized_markers, dtype=torch.long)
-    
+            self.channel_ids[dataset] = torch.tensor(
+                tokenized_markers, dtype=torch.long
+            )
+
             if len(unsupported_markers) > 0:
                 self.unsupported_markers_per_ds[dataset] = unsupported_markers
-
 
         if self.unsupported_markers_per_ds:
             msg = f"Unsupported markers found in the panels config (dataset: {{markers}}): {self.unsupported_markers_per_ds}."
@@ -116,9 +121,7 @@ class MultiplexDataset(Dataset):
                     f"{msg} Provided tokenizer does not recognize these markers. Set unsupported_marker_behavior='drop' to ignore them."
                 )
 
-            print(
-                f"{msg} These markers will be dropped from the dataset."
-            )
+            print(f"{msg} These markers will be dropped from the dataset.")
 
         # Load image paths for each dataset
         img_path = panels_config["paths"][split]
@@ -176,7 +179,7 @@ class MultiplexDataset(Dataset):
         self.read_file_func = (
             tifffile.imread if self.file_extension == "tiff" else np.load
         )
-    
+
     def _prune_unsupported_markers(
         self,
         img,
@@ -190,7 +193,9 @@ class MultiplexDataset(Dataset):
             img = img[supported_channel_mask]
             channel_ids = channel_ids[supported_channel_mask]
             marker_names = [
-                marker for marker, is_supported in zip(marker_names, supported_channel_mask) if is_supported
+                marker
+                for marker, is_supported in zip(marker_names, supported_channel_mask)
+                if is_supported
             ]
 
         return img, channel_ids, marker_names

@@ -93,7 +93,7 @@ from .immuvis import (
 )
 
 # DINO projection head
-from .dino import DINOHead
+from .dino import DINOHead, DINOvMFHead, VMFPredictor
 
 
 __all__ = [
@@ -129,4 +129,6 @@ __all__ = [
     "MultiplexAutoencoder",
     # DINO projection head
     "DINOHead",
+    "DINOvMFHead",
+    "VMFPredictor",
 ]

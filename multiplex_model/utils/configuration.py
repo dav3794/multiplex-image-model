@@ -98,6 +98,33 @@ class DINOHeadConfig(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
 
+class IBOTHeadConfig(BaseModel):
+    """Configuration for the continuous vMF projection head (DINOvMFHead)."""
+
+    out_dim: int = Field(
+        default=256,
+        gt=0,
+        description="Dimensionality D of the vMF projection space (hypersphere S^{D-1})",
+    )
+    hidden_dim: int = Field(
+        default=2048, gt=0, description="Hidden dimension of the head MLP"
+    )
+    n_layers: int = Field(default=3, gt=0, description="Number of MLP layers (>=1)")
+
+    model_config = ConfigDict(extra="forbid")
+
+
+class IBOTPredictorConfig(BaseModel):
+    """Configuration for the student-only vMF predictor head (VMFPredictor)."""
+
+    hidden_dim: int = Field(
+        default=2048, gt=0, description="Hidden dimension of the predictor MLP"
+    )
+    n_layers: int = Field(default=2, gt=0, description="Number of MLP layers (>=1)")
+
+    model_config = ConfigDict(extra="forbid")
+
+
 class EncoderConfig(BaseModel):
     """Configuration for MultiplexImageEncoder."""
 
@@ -143,6 +170,31 @@ class EncoderConfig(BaseModel):
     dino_head_config: DINOHeadConfig | None = Field(
         default=None,
         description="Configuration for the DINO head; only used when dino_head is True",
+    )
+
+    ibot_head: bool = Field(
+        default=False,
+        description="Whether to attach a continuous vMF projection head (DINOvMFHead)",
+    )
+    ibot_head_config: IBOTHeadConfig | None = Field(
+        default=None,
+        description="Configuration for the vMF iBOT head; only used when ibot_head is True",
+    )
+    ibot_mode: Literal["pooled", "dense"] = Field(
+        default="dense",
+        description=(
+            "What the vMF iBOT head consumes: 'pooled' projects only the global-average-pooled "
+            "latent, 'dense' additionally projects every latent feature-map cell. Only used when "
+            "ibot_head is True."
+        ),
+    )
+    ibot_predictor_config: IBOTPredictorConfig | None = Field(
+        default=None,
+        description=(
+            "Configuration for the student-only vMF predictor (part of the model, so the learned "
+            "concentration kappa is checkpointed and reusable downstream). Only used when "
+            "ibot_head is True."
+        ),
     )
 
     @field_validator("ma_layers_blocks", "pm_layers_blocks")
@@ -608,6 +660,58 @@ class DINOTrainingConfig(TrainingConfig):
         default=1,
         ge=0,
         description="Number of initial epochs to freeze the DINO head's last layer",
+    )
+
+    model_config = ConfigDict(extra="forbid")
+
+
+class IBOTTrainingConfig(TrainingConfig):
+    """Configuration for masked reconstruction + vMF iBOT self-distillation training.
+
+    Uses the Beta-NLL pixel reconstruction loss together with the continuous
+    hyperspherical vMF iBOT loss and the modified KoLeo regularizer (the discrete-prototype
+    DINO loss is intentionally not used).
+    """
+
+    num_global_views: int = Field(
+        default=2, gt=1, description="Number of augmented (masked) views per image"
+    )
+
+    # Loss weights
+    recon_loss_weight: float = Field(
+        default=1.0, ge=0, description="Weight for the Beta-NLL reconstruction loss"
+    )
+    ibot_loss_weight: float = Field(
+        default=1.0, ge=0, description="Weight for the vMF iBOT self-distillation loss"
+    )
+    koleo_loss_weight: float = Field(
+        default=0.1, ge=0, description="Weight for the modified KoLeo regularization loss"
+    )
+
+    # vMF loss parameters
+    ibot_beta: float = Field(
+        default=0.5,
+        ge=0,
+        description="Beta-NLL exponent detaching the uncertainty scale from the gradient",
+    )
+    center_momentum: float = Field(
+        default=0.9,
+        ge=0,
+        le=1,
+        description="EMA momentum for the teacher vMF centering vector",
+    )
+    koleo_max_samples: int | None = Field(
+        default=None,
+        gt=0,
+        description="Optional subsampling cap for the KoLeo nearest-neighbour computation",
+    )
+
+    # Teacher EMA
+    momentum_teacher: float = Field(
+        default=0.996,
+        ge=0,
+        le=1,
+        description="Base EMA momentum for the teacher (cosine-annealed to 1.0)",
     )
 
     model_config = ConfigDict(extra="forbid")
