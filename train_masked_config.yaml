@@ -47,7 +47,7 @@ save_checkpoint_freq: 5
 beta: 1.0
 
 # Comet.ml logging configuration
-tags: [...]
-comet_project: ...
-comet_workspace: null  # optional, can also be set via COMET_WORKSPACE env var
+tags: []
+comet_project: multiplex-image-model
+comet_workspace: micha-zmys-owski  # optional, can also be set via COMET_WORKSPACE env var
 comet_api_key: null  # optional, can also be set via COMET_API_KEY env var

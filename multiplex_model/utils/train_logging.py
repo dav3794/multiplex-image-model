@@ -1,5 +1,6 @@
 """Logging and visualization utilities for training and validation."""
 
+import os
 import re
 from datetime import datetime
 from io import BytesIO
@@ -29,7 +30,7 @@ def plot_reconstructs_with_uncertainty(
     ncols: int = 9,
     scale_by_max: bool = True,
     partially_masked_ids: list[int] = [],
-):
+) -> plt.Figure:
     """Plot the original image and the reconstructed image with uncertainty.
 
     Args:
@@ -66,7 +67,7 @@ def plot_reconstructs_with_uncertainty(
         ax_uncertainty.axis("off")
 
         if j < num_channels:
-            marker_name = markers_names_map[channel_ids[0, j].item()]
+            marker_name = markers_names_map[int(channel_ids[0, j].item())]
             ax_img.imshow(orig_img[0, j].cpu().numpy(), cmap="CMRmap", vmin=0, vmax=1)
             ax_img.set_title(f"Original\n{marker_name}")
 
@@ -111,7 +112,7 @@ def plot_reconstructs_with_masks(
     fully_masked_ids: list[int],
     markers_names_map: dict[int, str],
     ncols: int = 9,
-):
+) -> plt.Figure:
     """Plot the original image, masked image (with white pixels where masked), and reconstruction.
 
     Args:
@@ -148,7 +149,7 @@ def plot_reconstructs_with_masks(
         ax_reconstructed = ax_flat[i + 2]
 
         if j < num_channels:
-            channel_id = channel_ids[0, j].item()
+            channel_id = int(channel_ids[0, j].item())
             marker_name = markers_names_map[channel_id]
 
             # Show original
@@ -182,7 +183,7 @@ def plot_reconstructs_with_masks(
                 masked_idx = channel_to_masked_idx[channel_id]
 
                 # Convert grayscale to RGBA using colormap (image already normalized to 0-1)
-                cmap = plt.cm.CMRmap
+                cmap = plt.cm.CMRmap  # type: ignore[attr-defined]
                 img_data = orig_img[0, j].cpu().numpy()
                 rgba_img = cmap(img_data)  # Apply colormap directly
 
@@ -259,8 +260,8 @@ def get_next_version_number(
 
         latest_experiment = experiments[0]
 
-        version = re.match(version_pattern, latest_experiment.name)
-        version = int(version.group(1))
+        m = re.match(version_pattern, latest_experiment.name)
+        version = int(m.group(1)) if m else 0
 
         # Return next version (1 if no versions exist)
         return version + 1
@@ -295,13 +296,20 @@ def init_experiment(config: dict[str, Any]) -> None:
                 api_key=config.get("comet_api_key"),
             )
             run_name = f"ImVs-{version}"
+            # Parallel jobs race on the version query and can get the same number;
+            # the SLURM job id disambiguates so their checkpoints don't overwrite.
+            slurm_job_id = os.environ.get("SLURM_JOB_ID")
+            if slurm_job_id:
+                run_name = f"{run_name}-{slurm_job_id}"
         else:
             # Fallback to date-time as default run name
             run_name = datetime.now().strftime("%m%d_%H:%M:%S")
 
     print(f"Run name: {run_name}")
     _experiment.set_name(run_name)
-    _experiment.add_tags(config.get("tags", []))
+    tags = config.get("tags", [])
+    if tags:
+        _experiment.add_tags(tags)
     _experiment.log_parameters(config)
 
 
@@ -315,6 +323,7 @@ def log_training_metrics(
     step: int | None = None,
     standard_nll: float | None = None,
     gp_nll: float | None = None,
+    mask_token: float | None = None,
 ) -> None:
     """Log training metrics to Comet.ml.
 
@@ -328,6 +337,7 @@ def log_training_metrics(
         step (int | None): Step number for logging
         standard_nll (float | None): Standard NLL loss component (GP training)
         gp_nll (float | None): GP-based NLL loss component (GP training)
+        mask_token (float | None): Learnable mask token value
     """
     if _experiment is None:
         return
@@ -344,6 +354,8 @@ def log_training_metrics(
         metrics["train/standard_nll"] = standard_nll
     if gp_nll is not None:
         metrics["train/gp_nll"] = gp_nll
+    if mask_token is not None:
+        metrics["train/mask_token"] = mask_token
     _experiment.log_metrics(metrics, step=step)
 
 
@@ -354,6 +366,9 @@ def log_validation_metrics(
     latent_rankme: float,
     epoch: int,
     variance_mae_correlation: float | None = None,
+    variance_mse_correlation: float | None = None,
+    val_standard_nll: float | None = None,
+    val_gp_nll: float | None = None,
 ) -> None:
     """Log validation metrics to Comet.ml.
 
@@ -364,6 +379,7 @@ def log_validation_metrics(
         latent_rankme (float): RankMe metric for latent representations
         epoch (int): Current epoch number
         variance_mae_correlation (Optional[float]): Pearson correlation between predicted variances and MAEs per channel
+        variance_mse_correlation (Optional[float]): Pearson correlation between predicted variances and MSEs per channel
     """
     if _experiment is None:
         return
@@ -376,7 +392,31 @@ def log_validation_metrics(
     }
     if variance_mae_correlation is not None:
         metrics["val/variance_mae_correlation"] = variance_mae_correlation
+    if variance_mse_correlation is not None:
+        metrics["val/variance_mse_correlation"] = variance_mse_correlation
+    if val_standard_nll is not None:
+        metrics["val/standard_nll"] = val_standard_nll
+    if val_gp_nll is not None:
+        metrics["val/gp_nll"] = val_gp_nll
     _experiment.log_metrics(metrics, epoch=epoch)
+
+
+def log_validation_batch_metrics(
+    variance_mse_correlation_per_batch: float,
+    step: int,
+) -> None:
+    """Log per-batch validation metrics to Comet.ml.
+
+    Args:
+        variance_mse_correlation_per_batch (float): Pearson correlation between predicted variances and MSEs per channel for a single batch
+        step (int): Global step number
+    """
+    if _experiment is None:
+        return
+    _experiment.log_metrics(
+        {"val/variance_mse_correlation_per_batch": variance_mse_correlation_per_batch},
+        step=step,
+    )
 
 
 def log_validation_images(
@@ -386,6 +426,7 @@ def log_validation_images(
     epoch: int,
     masked_channels_names: str,
     img_idx: int,
+    name_suffix: str = "",
 ) -> None:
     """Log validation reconstruction images to Comet.ml.
 
@@ -396,6 +437,7 @@ def log_validation_images(
         epoch (int): Current epoch number
         masked_channels_names (str): Names of masked channels
         img_idx (int): Index of the image in the batch
+        name_suffix (str): Optional suffix appended to the image name
     """
     if _experiment is None:
         return
@@ -408,7 +450,7 @@ def log_validation_images(
 
     _experiment.log_image(
         img,
-        name=f"val/reconstructions_panel-{panel_idx}_epoch-{epoch + 1}_img-{img_idx}",
+        name=f"val/reconstructions_panel-{panel_idx}_epoch-{epoch + 1}_img-{img_idx}{name_suffix}",
         step=epoch,
         metadata={
             "panel_idx": panel_idx,

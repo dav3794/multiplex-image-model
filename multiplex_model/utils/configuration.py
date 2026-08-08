@@ -3,7 +3,7 @@
 import os
 from typing import Any
 
-from pydantic import BaseModel, Field, field_validator
+from pydantic import BaseModel, Field, ValidationInfo, field_validator, model_validator
 
 from .train_logging import get_run_name
 
@@ -84,6 +84,14 @@ class EncoderConfig(BaseModel):
             "Can be a string (e.g., 'convnext') or a dict with 'type' and 'module_parameters'."
         ),
     )
+    use_mask_token: bool = Field(
+        default=False,
+        description="Whether to replace spatially-masked pixels with a learnable scalar token",
+    )
+    mask_token_init: float = Field(
+        default=0.0,
+        description="Initial value for the learnable mask token",
+    )
 
     @field_validator("ma_layers_blocks", "pm_layers_blocks")
     @classmethod
@@ -101,7 +109,7 @@ class EncoderConfig(BaseModel):
 
     @field_validator("ma_embedding_dims")
     @classmethod
-    def validate_ma_lengths(cls, v: list[int], info) -> list[int]:
+    def validate_ma_lengths(cls, v: list[int], info: ValidationInfo) -> list[int]:
         if "ma_layers_blocks" in info.data:
             blocks = info.data["ma_layers_blocks"]
             if len(v) != len(blocks):
@@ -121,7 +129,7 @@ class EncoderConfig(BaseModel):
 
     @field_validator("pm_embedding_dims")
     @classmethod
-    def validate_pm_lengths(cls, v: list[int], info) -> list[int]:
+    def validate_pm_lengths(cls, v: list[int], info: ValidationInfo) -> list[int]:
         if len(v) == 0:
             raise ValueError(
                 "pm_embedding_dims cannot be empty - at least one pan-marker layer is required"
@@ -160,7 +168,7 @@ class DecoderConfig(BaseModel):
 
     @field_validator("block_type", mode="before")
     @classmethod
-    def validate_block_type(cls, v) -> ModuleConfig:
+    def validate_block_type(cls, v: Any) -> ModuleConfig:
         if v is None:
             return ModuleConfig(type="convnext")
         if isinstance(v, ModuleConfig):
@@ -242,6 +250,15 @@ class TrainingConfig(BaseModel):
     use_kronecker_gp: bool = Field(
         False, description="Whether to use Kronecker GP loss instead of CG-based GP loss"
     )
+    use_marker_covariance: bool = Field(
+        False, description="Whether to use marker covariance in Kronecker GP loss (requires use_kronecker_gp=True)"
+    )
+    marker_embed_dim: int = Field(
+        32, gt=0, description="Projection dimension for marker embeddings in K_C computation"
+    )
+    marker_jitter: float = Field(
+        1e-2, gt=0, description="Jitter added to marker covariance K_C for numerical stability"
+    )
 
     # Model architecture
     encoder_config: EncoderConfig = Field(
@@ -255,6 +272,10 @@ class TrainingConfig(BaseModel):
     from_checkpoint: str | None = Field(
         None,
         description="Path to checkpoint to resume from. Use 'last' to load last checkpoint if available",
+    )
+    reset_lr_schedule: bool = Field(
+        False,
+        description="When resuming, ignore checkpoint's scheduler/optimizer state and start a fresh LR schedule",
     )
     checkpoints_dir: str = Field(
         "checkpoints", description="Directory to save checkpoints"
@@ -273,6 +294,12 @@ class TrainingConfig(BaseModel):
         default_factory=list, description="Tags for Comet.ml experiment"
     )
     run_name: str | None = Field(None, description="Name for Comet.ml experiment")
+
+    @model_validator(mode='after')
+    def _validate_marker_covariance_requires_kronecker(self) -> 'TrainingConfig':
+        if self.use_marker_covariance and not self.use_kronecker_gp:
+            raise ValueError("use_marker_covariance=True requires use_kronecker_gp=True")
+        return self
 
     def resolve_checkpoint(self) -> bool:
         """Resolve checkpoint path and determine if checkpoint should be loaded.

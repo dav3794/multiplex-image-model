@@ -421,3 +421,225 @@ class KroneckerPlusSpatialCovariance(nn.Module):
         mahal      = (E * K_inv_E).sum()                         # scalar
 
         return -0.5 * (mahal + log_det_K_total + N * C * math.log(2 * math.pi))
+
+
+class KroneckerMarkerCovariance(nn.Module):
+    """
+    GP covariance with triple Kronecker structure + marker covariance + Woodbury.
+
+    Models K = (K_x ⊗ K_y) ⊗ K_C + U_block·U_blockᵀ + jitter·I
+
+    K_C is computed from Hyperkernel marker embeddings projected to a lower
+    dimension: K_C = E·Eᵀ + marker_jitter·I. Eigendecomposed every forward
+    pass (O(C³), cheap for C ≤ 40).
+
+    Spatial K_x, K_y are 1D Matérn kernels eigendecomposed once at init
+    (same as KroneckerPlusSpatialCovariance).
+
+    The full NC×NC covariance is never materialised. A⁻¹v is computed via
+    three einsum contractions (spatial x, spatial y, marker).
+    """
+
+    def __init__(
+        self,
+        grid_size: int,
+        marker_embed_dim: int,
+        hyperkernel_model_dim: int,
+        kernel_jitter: float = 1e-2,
+        marker_jitter: float = 1e-2,
+        spatial_matern_kernel_nu: float = 1.5,
+        spatial_matern_kernel_length_scale: float = 5.0,
+        device=None,
+    ):
+        super().__init__()
+        if device is None:
+            device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+
+        self.kernel_jitter = kernel_jitter
+        self.marker_jitter = marker_jitter
+        self.grid_size = grid_size
+        self.N = grid_size * grid_size
+
+        # --- Spatial eigendecomposition (identical to KroneckerPlusSpatialCovariance) ---
+        x1d = torch.linspace(0, 1, grid_size, device=device).unsqueeze(-1)
+
+        k1d = gpytorch.kernels.MaternKernel(nu=spatial_matern_kernel_nu).to(device)
+        k1d.lengthscale = spatial_matern_kernel_length_scale
+        k1d.raw_lengthscale.requires_grad = False
+
+        with torch.no_grad():
+            K1d = k1d(x1d).evaluate()
+            lam, V = torch.linalg.eigh(K1d)
+
+        self.register_buffer("lam", lam)
+        self.register_buffer("V", V)
+
+        # Spatial-only Kronecker eigenvalues (without jitter — jitter added in triple_eigs)
+        kron_eigs = torch.outer(lam, lam)  # [n, n]
+        self.register_buffer("kron_eigs", kron_eigs)
+
+        # --- Marker embedding projection ---
+        self.embedding_projection = nn.Linear(hyperkernel_model_dim, marker_embed_dim)
+
+    def _A_solve_triple(
+        self,
+        v: torch.Tensor,
+        V_C: torch.Tensor,
+        triple_eigs: torch.Tensor,
+    ) -> torch.Tensor:
+        """
+        Solve A⁻¹v where A = (K_x ⊗ K_y) ⊗ K_C + jitter·I, analytically.
+
+        A = (V_x ⊗ V_y ⊗ V_C) diag(triple_eigs) (V_x ⊗ V_y ⊗ V_C)ᵀ
+
+        Applied via six einsum contractions (3 forward + divide + 3 reverse).
+
+        Args:
+            v: [NC] or [NC, m]
+            V_C: [C, C] eigenvectors of K_C
+            triple_eigs: [n, n, C] = kron_eigs[i,j] * lam_C[k] + jitter
+
+        Returns:
+            A⁻¹v, same shape as v.
+        """
+        n = self.grid_size
+        C = V_C.shape[0]
+        squeeze = v.dim() == 1
+        if squeeze:
+            v = v.unsqueeze(-1)
+        m = v.shape[-1]
+
+        # Reshape [NC, m] -> [n, n, C, m] (spatial_x, spatial_y, marker, rhs)
+        V3 = v.reshape(n, n, C, m)
+
+        # Forward transform: (V_x ⊗ V_y ⊗ V_C)ᵀ v
+        # Contract marker axis with V_C
+        tmp = torch.einsum("ijcm, ck -> ijkm", V3, V_C)
+        # Contract spatial_y axis with V
+        tmp = torch.einsum("ijkm, jb -> ibkm", tmp, self.V)
+        # Contract spatial_x axis with V
+        tmp = torch.einsum("ibkm, ia -> abkm", tmp, self.V)
+
+        # Divide by eigenvalues
+        tmp = tmp / triple_eigs.unsqueeze(-1)
+
+        # Reverse transform: (V_x ⊗ V_y ⊗ V_C) tmp
+        tmp = torch.einsum("abkm, jb -> ajkm", tmp, self.V)
+        tmp = torch.einsum("ajkm, ia -> ijkm", tmp, self.V)
+        tmp = torch.einsum("ijkm, ck -> ijcm", tmp, V_C)
+
+        result = tmp.reshape(n * n * C, m)
+        return result.squeeze(-1) if squeeze else result
+
+    def _compute_marker_eigen(
+        self, marker_embeddings: torch.Tensor
+    ) -> tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
+        """
+        Project embeddings, build K_C, eigendecompose, compute triple eigenvalues.
+
+        Args:
+            marker_embeddings: [C, hyperkernel_model_dim]
+
+        Returns:
+            (V_C, triple_eigs, K_C):
+                V_C: [C, C] eigenvectors
+                triple_eigs: [n, n, C] eigenvalues of A
+                K_C: [C, C] marker covariance
+        """
+        E = self.embedding_projection(marker_embeddings)  # [C, D]
+        # Normalize rows to unit norm so K_C is a correlation matrix (diagonal = 1 + jitter).
+        # This decouples K_C conditioning from embedding_projection weight scale, keeping
+        # condition numbers bounded by C rather than growing with embedding magnitude.
+        E = nn.functional.normalize(E, p=2, dim=1)
+        C = E.shape[0]
+        K_C = E @ E.T + self.marker_jitter * torch.eye(C, device=E.device, dtype=E.dtype)
+        # Use float64 for eigh: when C > marker_embed_dim, K_C has C-D repeated eigenvalues
+        # at exactly marker_jitter. LAPACK's divide-and-conquer fails on near-repeated
+        # eigenvalues in float32; float64 precision resolves convergence reliably.
+        lam_C, V_C = torch.linalg.eigh(K_C.double())
+        lam_C = lam_C.to(E.dtype)
+        V_C = V_C.to(E.dtype)
+
+        # triple_eigs[i, j, k] = kron_eigs[i,j] * lam_C[k] + kernel_jitter
+        triple_eigs = self.kron_eigs.unsqueeze(-1) * lam_C.unsqueeze(0).unsqueeze(0) + self.kernel_jitter
+
+        return V_C, triple_eigs, K_C.double().to(E.dtype)
+
+    def log_prob_joint(
+        self,
+        mu_all: torch.Tensor,
+        U_all: torch.Tensor,
+        targets: torch.Tensor,
+        marker_embeddings: torch.Tensor,
+    ) -> torch.Tensor:
+        """
+        Joint log p(targets | mu, K) over all N pixels and C markers.
+
+        K = (K_x ⊗ K_y) ⊗ K_C + U_block·U_blockᵀ + jitter·I
+
+        Uses Woodbury identity with rank-C U_block.
+
+        Args:
+            mu_all:  [N, C] predicted means
+            U_all:   [N, C] per-pixel std dev per channel
+            targets: [N, C] ground truth
+            marker_embeddings: [C, hyperkernel_model_dim] raw Hyperkernel embeddings
+
+        Returns:
+            Scalar log probability.
+        """
+        N, C = targets.shape
+        NC = N * C
+
+        V_C, triple_eigs, _ = self._compute_marker_eigen(marker_embeddings)
+
+        # Error vector in spatial-major order: [pix0_ch0, pix0_ch1, ..., pixN_chC]
+        e = (targets - mu_all).reshape(-1)  # [NC]
+
+        # Build U_block [NC, C] in spatial-major order: row (i*C + c) = pixel i, marker c
+        U_block = torch.diag_embed(U_all).reshape(NC, C)
+
+        # log det(A)
+        if (triple_eigs <= 0).any():
+            raise RuntimeError(
+                f"Non-positive triple eigenvalues (min={triple_eigs.min().item():.3e}). "
+                "Increase kernel_jitter or marker_jitter."
+            )
+        log_det_A = triple_eigs.log().sum()
+
+        # A⁻¹ applied to error and U_block columns (C+1 RHS, batched)
+        rhs = torch.cat([e.unsqueeze(-1), U_block], dim=-1)  # [NC, C+1]
+        A_inv_rhs = self._A_solve_triple(rhs, V_C, triple_eigs)  # [NC, C+1]
+        A_inv_e = A_inv_rhs[:, 0]       # [NC]
+        A_inv_U = A_inv_rhs[:, 1:]      # [NC, C]
+
+        # Woodbury inner matrix: M = I_C + U_blockᵀ A⁻¹ U_block  [C, C]
+        M = torch.eye(C, device=e.device, dtype=e.dtype) + U_block.T @ A_inv_U
+
+        # log det(K) = log det(A) + log det(M)
+        log_det_K = log_det_A + torch.linalg.slogdet(M)[1]
+
+        # K⁻¹ e = A⁻¹e - A⁻¹U M⁻¹ Uᵀ A⁻¹e
+        Ut_Ainv_e = U_block.T @ A_inv_e  # [C]
+        correction = A_inv_U @ torch.linalg.solve(M, Ut_Ainv_e)  # [NC]
+        K_inv_e = A_inv_e - correction
+
+        mahal = e @ K_inv_e
+
+        return -0.5 * (mahal + log_det_K + NC * math.log(2 * math.pi))
+
+    def compute_marker_correlation(self, marker_embeddings: torch.Tensor) -> torch.Tensor:
+        """
+        Compute C×C correlation matrix from projected marker embeddings.
+
+        Args:
+            marker_embeddings: [C, hyperkernel_model_dim]
+
+        Returns:
+            [C, C] correlation matrix (ones on diagonal).
+        """
+        E = nn.functional.normalize(self.embedding_projection(marker_embeddings), p=2, dim=1)
+        K_C = E @ E.T + self.marker_jitter * torch.eye(E.shape[0], device=E.device, dtype=E.dtype)
+        # Normalize to correlation: corr[i,j] = K_C[i,j] / sqrt(K_C[i,i] * K_C[j,j])
+        diag_sqrt = torch.sqrt(torch.diag(K_C))
+        return K_C / (diag_sqrt.unsqueeze(0) * diag_sqrt.unsqueeze(1))

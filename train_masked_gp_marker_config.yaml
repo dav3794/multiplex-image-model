@@ -1,26 +1,27 @@
-# Configuration for training with Gaussian Process-based loss
-# This extends the standard config with GP-specific parameters
+# Configuration for training with Kronecker Marker GP loss
+# Extends standard GP config with marker covariance from Hyperkernel embeddings
 
 # ============================================================================
 # GP LOSS CONFIGURATION
 # ============================================================================
-use_gp_loss: true                    # Enable/disable GP loss
-use_kronecker_gp: true               # Use Kronecker (~40x faster than CG)
-lambda_gp: 0.1                      # Weight for GP loss (0.0 = only standard, 1.0 = only GP)
-gp_kernel_jitter: 1e-2               # Diagonal noise for numerical stability
-gp_lengthscale: 5.0                  # Spatial correlation length scale
-gp_max_cg_iterations: 50             # Max conjugate gradient iterations
-gp_downscale_factor: 1               # Spatial downsampling (1=none, 2=half, 4=quarter)
-gp_learn_lengthscale: true          # Whether to learn kernel lengthscale
+use_gp_loss: true
+use_kronecker_gp: true
+use_marker_covariance: true          # Enable marker covariance (K_C from embeddings)
+marker_embed_dim: 32                  # Projection dim for embedding -> K_C
+marker_jitter: 1e-2                   # Jitter for K_C numerical stability
+lambda_gp: 0.1
+gp_kernel_jitter: 1e-2
+gp_lengthscale: 5.0
+gp_max_cg_iterations: 50
+gp_downscale_factor: 1
+gp_learn_lengthscale: false           # Not applicable for Kronecker
 
 # ============================================================================
 # STANDARD TRAINING CONFIGURATION
 # ============================================================================
 encoder:
-    # marker-agnostic part
     ma_layers_blocks: [4,]
     ma_embedding_dims: [16,]
-    # pan-marker part
     pm_layers_blocks: [4, 4, 4]
     pm_embedding_dims: [128, 256, 512]
     use_latent_norm: true
@@ -60,14 +61,14 @@ min_channels_frac: 0.75
 spatial_masking_ratio: 0.6
 fully_masked_channels_max_frac: 0.5
 mask_patch_size: 8
-from_checkpoint: checkpoints/last_checkpoint-ImVs-12.pth
-reset_lr_schedule: true              # fresh cosine cycle from trained weights
+from_checkpoint: null
+reset_lr_schedule: false
 checkpoints_dir: checkpoints
 save_checkpoint_freq: 5
 beta: 0.5
 
 # Comet.ml logging configuration
-tags: ['SZARY', 'GP', 'kronecker', 'lambda 0.1', 'run2']
+tags: ['SZARY', 'GP', 'kronecker', 'marker-covariance']
 comet_project: multiplex-image-model
 comet_workspace: micha-zmys-owski
-comet_api_key: null  # set via COMET_API_KEY env var
+comet_api_key: null

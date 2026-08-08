@@ -1,14 +1,14 @@
-"""
-Training script for masked multiplex image model with GP-based loss.
+"""Training script combining learnable spatial mask token with Kronecker marker GP loss.
 
-This script extends the standard training with a Gaussian Process-based negative
-log-likelihood loss that models spatial correlations using the GP covariance module.
+Merges the mask-token flow from `train_masked_model_learnmask.py` with the
+Kronecker + marker covariance GP loss from `train_masked_model_gp.py`.
 """
 
 import logging
 import math
 import os
 import sys
+from typing import Any
 
 import comet_ml  # noqa: F401
 import matplotlib.pyplot as plt
@@ -30,25 +30,19 @@ from tqdm import tqdm
 
 from multiplex_model.data import DatasetFromTIFF, PanelBatchSampler, TestCrop
 from multiplex_model.losses import (
-    HybridGPNLLLoss,
-    HybridKroneckerGPNLLLoss,
     HybridKroneckerMarkerGPNLLLoss,
     RankMe,
     beta_nll_loss,
     nll_loss,
 )
-from multiplex_model.modules.gp_covariance import (
-    KroneckerMarkerCovariance,
-    KroneckerPlusSpatialCovariance,
-    LowRankTimesSpatialCovariance,
-)
 from multiplex_model.modules import MultiplexAutoencoder
+from multiplex_model.modules.gp_covariance import KroneckerMarkerCovariance
 from multiplex_model.utils import (
     ClampWithGrad,
     TrainingConfig,
     apply_channel_masking,
-    apply_spatial_masking,
     finish_experiment,
+    get_pixel_mask,
     get_run_name,
     get_scheduler_with_warmup,
     init_experiment,
@@ -63,7 +57,7 @@ from multiplex_model.utils import (
 logger = logging.getLogger(__name__)
 
 
-def train_masked_gp(
+def train_masked_learnmask_gp(
     model,
     optimizer,
     scheduler,
@@ -71,12 +65,10 @@ def train_masked_gp(
     val_dataloader,
     device,
     marker_names_map,
-    gp_covariance_module=None,
+    gp_covariance_module,
+    gp_loss_fn,
+    total_steps,
     use_gp_loss=True,
-    use_marker_covariance=False,
-    lambda_gp=0.1,
-    gp_max_cg_iterations=50,
-    gp_downscale_factor=1,
     epochs=10,
     gradient_accumulation_steps=1,
     beta=1.0,
@@ -88,33 +80,6 @@ def train_masked_gp(
     save_checkpoint_every=5,
     checkpoints_path="checkpoints",
 ):
-    """
-    Train a masked autoencoder with optional GP-based loss.
-    
-    Args:
-        model: The autoencoder model
-        optimizer: Optimizer
-        scheduler: Learning rate scheduler
-        train_dataloader: Training data loader
-        val_dataloader: Validation data loader
-        device: Computation device
-        marker_names_map: Mapping from token IDs to marker names
-        gp_covariance_module: GP covariance module (LowRankTimesSpatialCovariance)
-        use_gp_loss: Whether to use GP loss
-        lambda_gp: Weight for GP loss component
-        gp_max_cg_iterations: Max CG iterations for GP loss
-        gp_downscale_factor: Downsampling factor for GP loss
-        epochs: Number of training epochs
-        gradient_accumulation_steps: Number of gradient accumulation steps
-        beta: Beta parameter for beta-NLL loss
-        min_channels_frac: Minimum fraction of channels to keep
-        fully_masked_channels_max_frac: Max fraction of fully masked channels
-        spatial_masking_ratio: Ratio of spatial masking
-        mask_patch_size: Size of spatial mask patches
-        start_epoch: Starting epoch (for resuming)
-        save_checkpoint_every: Checkpoint save frequency
-        checkpoints_path: Directory to save checkpoints
-    """
     model.train()
     scaler = GradScaler()
     run_name = get_run_name()
@@ -123,52 +88,22 @@ def train_masked_gp(
         os.makedirs(checkpoints_path, exist_ok=True)
         print(f"Created checkpoints directory at {checkpoints_path}")
 
-    # Initialize GP loss if enabled
-    gp_loss_fn = None
-    if use_gp_loss and gp_covariance_module is not None:
-        if isinstance(gp_covariance_module, KroneckerMarkerCovariance):
-            gp_loss_fn = HybridKroneckerMarkerGPNLLLoss(
-                covariance_module=gp_covariance_module,
-                lambda_gp=lambda_gp,
-                downscale_factor=gp_downscale_factor,
-                device=device,
-            )
-            print(f"Using Kronecker Marker GP loss with lambda_gp={lambda_gp}")
-        elif isinstance(gp_covariance_module, KroneckerPlusSpatialCovariance):
-            gp_loss_fn = HybridKroneckerGPNLLLoss(
-                covariance_module=gp_covariance_module,
-                lambda_gp=lambda_gp,
-                downscale_factor=gp_downscale_factor,
-                device=device,
-            )
-            print(f"Using Kronecker GP loss with lambda_gp={lambda_gp}")
-        else:
-            gp_loss_fn = HybridGPNLLLoss(
-                covariance_module=gp_covariance_module,
-                lambda_gp=lambda_gp,
-                max_cg_iterations=gp_max_cg_iterations,
-                downscale_factor=gp_downscale_factor,
-                device=device,
-            )
-            print(f"Using CG GP loss with lambda_gp={lambda_gp}")
-
     step = start_epoch * (len(train_dataloader) // gradient_accumulation_steps)
-    
+
     for epoch in range(start_epoch, epochs):
         model.train()
-        epoch_loss_components = {
+        epoch_loss_components: dict[str, list[float]] = {
             "standard_nll": [],
             "gp_nll": [],
             "total_loss": [],
         }
-        
+
         for batch_idx, (img, channel_ids, panel_idx, img_path) in enumerate(
             tqdm(train_dataloader, desc=f"Epoch {epoch}")
         ):
             img = img.to(device, dtype=torch.float32)
             channel_ids = channel_ids.to(device, dtype=torch.long)
 
-            # Apply channel masking with channel subset sampling
             img, channel_ids, masked_img, active_channel_ids = apply_channel_masking(
                 img,
                 channel_ids,
@@ -177,28 +112,26 @@ def train_masked_gp(
                 apply_channel_subset_sampling=True,
             )
 
-            # Apply spatial masking
-            masked_img, _ = apply_spatial_masking(
-                masked_img, spatial_masking_ratio, mask_patch_size
-            )
+            pixel_mask = get_pixel_mask(masked_img, spatial_masking_ratio, mask_patch_size)
 
-            output = model(masked_img, active_channel_ids, channel_ids)["output"]
-            mi, logvar = output.unbind(dim=-1)
-            mi = torch.sigmoid(mi)
-            logvar = ClampWithGrad.apply(logvar, -15.0, 15.0)
+            with autocast(device_type="cuda", dtype=torch.bfloat16):
+                output = model(
+                    masked_img, active_channel_ids, channel_ids, spatial_mask=pixel_mask
+                )["output"]
+                mi, logvar = output.unbind(dim=-1)
+                mi = torch.sigmoid(mi)
+                logvar = ClampWithGrad.apply(logvar, -15.0, 15.0)
 
+            # GP loss runs in float32: linalg.solve in Woodbury (gp_covariance.py)
+            # rejects mixed bfloat16/float32 dtypes used by the precomputed Kronecker eigs.
             if use_gp_loss and gp_loss_fn is not None:
-                if use_marker_covariance:
-                    marker_emb = model.encoder.hyperkernel.hyperkernel_weights(channel_ids)
-                    loss, loss_dict = gp_loss_fn(img, mi, logvar, marker_emb)
-                else:
-                    loss, loss_dict = gp_loss_fn(img, mi, logvar)
-                
-                # Track loss components
+                marker_emb = model.encoder.hyperkernel.hyperkernel_weights(channel_ids)
+                loss, loss_dict = gp_loss_fn(
+                    img.float(), mi.float(), logvar.float(), marker_emb.float()
+                )
                 for key in loss_dict:
                     epoch_loss_components[key].append(loss_dict[key])
             else:
-                # Fall back to standard beta-NLL loss
                 loss = beta_nll_loss(img, mi, logvar, beta=beta)
                 epoch_loss_components["total_loss"].append(loss.item())
 
@@ -217,8 +150,9 @@ def train_masked_gp(
                 optimizer.zero_grad()
                 scheduler.step()
 
-                # Prepare metrics for logging
-                metrics = {
+                mask_token_value = model.encoder.mask_token.item() if model.encoder.mask_token is not None else None
+
+                metrics: dict[str, Any] = {
                     "loss": loss.item(),
                     "lr": scheduler.get_last_lr()[0],
                     "mu": mi.mean().item(),
@@ -226,28 +160,25 @@ def train_masked_gp(
                     "mae": torch.abs(img - mi).mean().item(),
                     "mse": torch.square(img - mi).mean().item(),
                     "step": step,
+                    "mask_token": mask_token_value,
                 }
-                
-                # Add GP loss components if applicable
-                if use_gp_loss and batch_idx > 0 and epoch_loss_components["gp_nll"]:
+                if use_gp_loss and epoch_loss_components["gp_nll"]:
                     metrics["standard_nll"] = epoch_loss_components["standard_nll"][-1]
                     metrics["gp_nll"] = epoch_loss_components["gp_nll"][-1]
-                
+
                 log_training_metrics(**metrics)
                 step += 1
 
-        # Print epoch statistics
         if use_gp_loss and epoch_loss_components["gp_nll"]:
-            avg_standard_nll = np.mean(epoch_loss_components["standard_nll"])
-            avg_gp_nll = np.mean(epoch_loss_components["gp_nll"])
-            avg_total = np.mean(epoch_loss_components["total_loss"])
+            avg_standard_nll = float(np.mean(epoch_loss_components["standard_nll"]))
+            avg_gp_nll = float(np.mean(epoch_loss_components["gp_nll"]))
+            avg_total = float(np.mean(epoch_loss_components["total_loss"]))
             print(f"\nEpoch {epoch} Loss Components:")
             print(f"  Standard NLL: {avg_standard_nll:.4f}")
-            print(f"  GP NLL: {avg_gp_nll:.4f}")
-            print(f"  Total Loss: {avg_total:.4f}")
+            print(f"  GP NLL:       {avg_gp_nll:.4f}")
+            print(f"  Total Loss:   {avg_total:.4f}")
 
-        # Validation
-        test_masked_gp(
+        test_masked_learnmask_gp(
             model,
             val_dataloader,
             device,
@@ -259,10 +190,8 @@ def train_masked_gp(
             mask_patch_size=mask_patch_size,
             marker_names_map=marker_names_map,
             use_gp_loss=use_gp_loss,
-            use_marker_covariance=use_marker_covariance,
         )
 
-        # Save checkpoint
         checkpoint = {
             "model_state_dict": model.state_dict(),
             "optimizer_state_dict": optimizer.state_dict(),
@@ -271,24 +200,25 @@ def train_masked_gp(
             "total_steps": total_steps,
         }
         if gp_covariance_module is not None:
-             checkpoint["gp_covariance_state_dict"] = gp_covariance_module.state_dict()
-        
+            checkpoint["gp_covariance_state_dict"] = gp_covariance_module.state_dict()
+        if hasattr(model, "get_architecture_config"):
+            checkpoint["model_config"] = model.get_architecture_config()
+
         if (epoch + 1) % save_checkpoint_every == 0:
-            torch.save(
-                checkpoint,
-                f"{checkpoints_path}/checkpoint-{run_name}-epoch_{epoch}.pth",
-            )
+            torch.save(checkpoint, f"{checkpoints_path}/checkpoint-{run_name}-epoch_{epoch}.pth")
         torch.save(checkpoint, f"{checkpoints_path}/last_checkpoint-{run_name}.pth")
 
     final_model_path = f"{checkpoints_path}/final_model-{run_name}.pth"
     print(f"Training completed. Saving final model at {final_model_path}...")
-    checkpoint = {
-        "model_state_dict": model.state_dict(),
-    }
-    torch.save(checkpoint, final_model_path)
+    final_checkpoint: dict[str, Any] = {"model_state_dict": model.state_dict()}
+    if hasattr(model, "get_architecture_config"):
+        final_checkpoint["model_config"] = model.get_architecture_config()
+    if gp_covariance_module is not None:
+        final_checkpoint["gp_covariance_state_dict"] = gp_covariance_module.state_dict()
+    torch.save(final_checkpoint, final_model_path)
 
 
-def test_masked_gp(
+def test_masked_learnmask_gp(
     model,
     test_dataloader,
     device,
@@ -301,28 +231,23 @@ def test_masked_gp(
     fully_masked_channels_max_frac=0.5,
     mask_patch_size=8,
     use_gp_loss=True,
-    use_marker_covariance=False,
 ):
-    """
-    Validation loop with optional GP loss evaluation.
-    """
     model.eval()
     running_loss = 0.0
     running_mae = 0.0
     running_mse = 0.0
-    
     running_standard_nll = 0.0
     running_gp_nll = 0.0
-    
+
     plot_indices = np.random.choice(
         np.arange(len(test_dataloader)), size=num_plots, replace=False
     )
     plot_indices = set(plot_indices)
 
-    all_latents = []
-    all_channel_variances = []
-    all_channel_maes = []
-    all_channel_mses = []
+    all_latents: list[torch.Tensor] = []
+    all_channel_variances: list[torch.Tensor] = []
+    all_channel_maes: list[torch.Tensor] = []
+    all_channel_mses: list[torch.Tensor] = []
 
     with torch.no_grad():
         for idx, (img, channel_ids, panel_idx, img_path) in enumerate(
@@ -331,7 +256,6 @@ def test_masked_gp(
             img = img.to(device, dtype=torch.float32)
             channel_ids = channel_ids.to(device, dtype=torch.long)
 
-            # Apply channel masking
             _, _, masked_img, active_channel_ids = apply_channel_masking(
                 img,
                 channel_ids,
@@ -339,12 +263,9 @@ def test_masked_gp(
                 apply_channel_subset_sampling=False,
             )
 
-            # Apply spatial masking
-            masked_img, pixel_mask = apply_spatial_masking(
-                masked_img, spatial_masking_ratio, mask_patch_size
-            )
+            pixel_mask = get_pixel_mask(masked_img, spatial_masking_ratio, mask_patch_size)
 
-            latent = model.encode(masked_img, active_channel_ids)["output"]
+            latent = model.encode(masked_img, active_channel_ids, spatial_mask=pixel_mask)["output"]
             output = model.decode(latent, channel_ids)
             mi, logvar = output.unbind(dim=-1)
             mi = torch.sigmoid(mi)
@@ -353,7 +274,6 @@ def test_masked_gp(
             latent = normalize(latent.mean(dim=(2, 3)), p=2, dim=1)
             all_latents.append(latent.cpu())
 
-            # Per-channel statistics
             variance_per_channel = torch.exp(logvar).mean(dim=(0, 2, 3))
             mae_per_channel = torch.abs(img - mi).mean(dim=(0, 2, 3))
             mse_per_channel = torch.square(img - mi).mean(dim=(0, 2, 3))
@@ -370,16 +290,12 @@ def test_masked_gp(
                     step=epoch * len(test_dataloader) + idx,
                 )
 
-            # Compute loss
             if use_gp_loss and gp_loss_fn is not None:
-                if use_marker_covariance:
-                    marker_emb = model.encoder.hyperkernel.hyperkernel_weights(channel_ids)
-                    loss, loss_dict = gp_loss_fn(img, mi, logvar, marker_emb)
-                else:
-                    loss, loss_dict = gp_loss_fn(img, mi, logvar)
+                marker_emb = model.encoder.hyperkernel.hyperkernel_weights(channel_ids)
+                loss, loss_dict = gp_loss_fn(img, mi, logvar, marker_emb)
                 running_standard_nll += loss_dict["standard_nll"]
                 running_gp_nll += loss_dict["gp_nll"]
-                if use_marker_covariance and idx == 0:
+                if idx == 0:
                     _, _, K_C = gp_covariance_module._compute_marker_eigen(marker_emb[0])
                     eigvals = torch.linalg.eigvalsh(K_C)
                     print(
@@ -389,12 +305,11 @@ def test_masked_gp(
                     )
             else:
                 loss = nll_loss(img, mi, logvar)
-            
+
             running_loss += loss.item()
             running_mae += torch.abs(img - mi).mean().item()
             running_mse += torch.square(img - mi).mean().item()
 
-            # Visualization
             if idx in plot_indices:
                 unactive_channels = [
                     i for i in channel_ids[0] if i not in active_channel_ids[0]
@@ -446,10 +361,9 @@ def test_masked_gp(
     val_mae = running_mae / len(test_dataloader)
     val_mse = running_mse / len(test_dataloader)
 
-    latents = torch.cat(all_latents)
-    rankme = RankMe(latents)
+    latents_cat = torch.cat(all_latents)
+    rankme = RankMe(latents_cat)
 
-    # Variance-MAE/MSE correlation
     all_variances = torch.cat(all_channel_variances)
     all_maes = torch.cat(all_channel_maes)
     all_mses = torch.cat(all_channel_mses)
@@ -460,7 +374,7 @@ def test_masked_gp(
         torch.stack([all_variances.flatten(), all_mses.flatten()])
     )[0, 1].item()
 
-    val_metrics = {
+    val_metrics: dict[str, Any] = {
         "val_loss": val_loss,
         "val_mae": val_mae,
         "val_mse": val_mse,
@@ -469,7 +383,6 @@ def test_masked_gp(
         "variance_mse_correlation": variance_mse_corr,
         "epoch": epoch,
     }
-    
     if use_gp_loss and gp_loss_fn is not None:
         val_metrics["val_standard_nll"] = running_standard_nll / len(test_dataloader)
         val_metrics["val_gp_nll"] = running_gp_nll / len(test_dataloader)
@@ -480,7 +393,7 @@ def test_masked_gp(
     print(f"Total Loss: {val_loss:.4f}")
     if use_gp_loss and gp_loss_fn is not None:
         print(f"Standard NLL: {val_metrics['val_standard_nll']:.4f}")
-        print(f"GP NLL: {val_metrics['val_gp_nll']:.4f}")
+        print(f"GP NLL:       {val_metrics['val_gp_nll']:.4f}")
     print(f"MAE: {val_mae:.6f}")
     print(f"MSE: {val_mse:.6f}")
     print(f"Pearson MAE vs Var: {variance_mae_corr:.4f}")
@@ -492,13 +405,11 @@ def test_masked_gp(
 
 
 if __name__ == "__main__":
-    # Load configuration
-    config_path = sys.argv[1] if len(sys.argv) > 1 else "train_masked_config.yaml"
+    config_path = sys.argv[1]
     yaml = YAML(typ="safe")
     with open(config_path, "r") as f:
         raw_config = yaml.load(f)
 
-    # Validate configuration
     config = TrainingConfig(**raw_config)
 
     device = config.device
@@ -512,7 +423,6 @@ if __name__ == "__main__":
     TOKENIZER = YAML().load(open(config.tokenizer_config))
     INV_TOKENIZER = {v: k for k, v in TOKENIZER.items()}
 
-    # Data transforms
     train_transform = Compose(
         [
             RandomRotation(180, interpolation=InterpolationMode.BILINEAR),
@@ -522,7 +432,6 @@ if __name__ == "__main__":
     )
     test_transform = TestCrop(SIZE[0])
 
-    # Datasets
     train_dataset = DatasetFromTIFF(
         panels_config=PANEL_CONFIG,
         split="train",
@@ -535,7 +444,6 @@ if __name__ == "__main__":
         use_clip_normalization=True,
         file_extension="npy",
     )
-
     test_dataset = DatasetFromTIFF(
         panels_config=PANEL_CONFIG,
         split="test",
@@ -569,120 +477,93 @@ if __name__ == "__main__":
         prefetch_factor=4,
     )
 
-    # Build model
     num_channels = len(TOKENIZER)
-    model = MultiplexAutoencoder(
-        num_channels=num_channels,
-        encoder_config=config.encoder_config.model_dump(),
-        decoder_config=config.decoder_config.model_dump(),
-    ).to(device)
+    model_config: dict[str, Any] = {
+        "num_channels": num_channels,
+        "encoder_config": config.encoder_config.model_dump(),
+        "decoder_config": config.decoder_config.model_dump(),
+    }
 
-    # GP Loss Configuration
-    use_gp_loss          = getattr(config, "use_gp_loss", False)
-    use_kronecker_gp     = getattr(config, "use_kronecker_gp", False)
-    lambda_gp            = getattr(config, "lambda_gp", 0.1)
-    gp_kernel_jitter     = getattr(config, "gp_kernel_jitter", 1e-2)
-    gp_lengthscale       = getattr(config, "gp_lengthscale", 5.0)
-    gp_max_cg_iterations = getattr(config, "gp_max_cg_iterations", 50)
-    gp_downscale_factor  = getattr(config, "gp_downscale_factor", 1)
-    gp_learn_lengthscale = getattr(config, "gp_learn_lengthscale", False)
+    use_gp_loss = getattr(config, "use_gp_loss", False)
+    use_kronecker_gp = getattr(config, "use_kronecker_gp", False)
     use_marker_covariance = getattr(config, "use_marker_covariance", False)
-    marker_embed_dim      = getattr(config, "marker_embed_dim", 32)
-    marker_jitter         = getattr(config, "marker_jitter", 1e-2)
+    lambda_gp = getattr(config, "lambda_gp", 0.1)
+    gp_kernel_jitter = getattr(config, "gp_kernel_jitter", 1e-2)
+    gp_lengthscale = getattr(config, "gp_lengthscale", 5.0)
+    gp_downscale_factor = getattr(config, "gp_downscale_factor", 1)
+    marker_embed_dim = getattr(config, "marker_embed_dim", 32)
+    marker_jitter = getattr(config, "marker_jitter", 1e-2)
+
+    assert use_gp_loss and use_kronecker_gp and use_marker_covariance, (
+        "This script combines learnmask with Kronecker marker GP loss. "
+        "Set use_gp_loss=true, use_kronecker_gp=true, use_marker_covariance=true."
+    )
 
     print("\nGP Loss Configuration:")
-    print(f"  Use GP Loss:         {use_gp_loss}")
-    print(f"  Use Kronecker GP:    {use_kronecker_gp}")
-    print(f"  Lambda GP:           {lambda_gp}")
-    print(f"  Kernel Jitter:       {gp_kernel_jitter}")
-    print(f"  Lengthscale:         {gp_lengthscale}")
-    print(f"  Max CG Iterations:   {gp_max_cg_iterations}  (ignored for Kronecker)")
-    print(f"  Downscale Factor:    {gp_downscale_factor}")
-    print(f"  Learn Lengthscale:   {gp_learn_lengthscale}  (ignored for Kronecker)")
-    print(f"  Use Marker Cov:      {use_marker_covariance}")
-    print(f"  Marker Embed Dim:    {marker_embed_dim}")
-    print(f"  Marker Jitter:       {marker_jitter}\n")
+    print(f"  Lambda GP:        {lambda_gp}")
+    print(f"  Kernel Jitter:    {gp_kernel_jitter}")
+    print(f"  Lengthscale:      {gp_lengthscale}")
+    print(f"  Downscale Factor: {gp_downscale_factor}")
+    print(f"  Marker Embed Dim: {marker_embed_dim}")
+    print(f"  Marker Jitter:    {marker_jitter}\n")
 
-    # Initialize GP covariance module
-    gp_covariance_module = None
-    if use_gp_loss:
-        H, W = SIZE
-        H_gp = H // gp_downscale_factor
-        W_gp = W // gp_downscale_factor
+    H, W = SIZE
+    H_gp = H // gp_downscale_factor
+    W_gp = W // gp_downscale_factor
+    assert H_gp == W_gp, (
+        f"Kronecker GP requires square spatial grid, got {H_gp}x{W_gp}."
+    )
 
-        if use_kronecker_gp and use_marker_covariance:
-            assert H_gp == W_gp, (
-                f"Kronecker GP requires square spatial grid, "
-                f"got {H_gp}x{W_gp}. Adjust input_image_size or gp_downscale_factor."
-            )
-            # Compute hyperkernel_model_dim from encoder config
-            hk_cfg = config.encoder_config
-            if len(hk_cfg.ma_layers_blocks) == 0:
-                hk_input_dim = 1
-            else:
-                hk_input_dim = hk_cfg.ma_embedding_dims[-1]
-            hk_embed_dim = hk_cfg.pm_embedding_dims[0]
-            hk_kernel_size = hk_cfg.hyperkernel_config.kernel_size
-            hyperkernel_model_dim = hk_embed_dim * (hk_kernel_size ** 2) * hk_input_dim
+    hk_cfg = config.encoder_config
+    if len(hk_cfg.ma_layers_blocks) == 0:
+        hk_input_dim = 1
+    else:
+        hk_input_dim = hk_cfg.ma_embedding_dims[-1]
+    hk_embed_dim = hk_cfg.pm_embedding_dims[0]
+    hk_kernel_size = hk_cfg.hyperkernel_config.kernel_size
+    hyperkernel_model_dim = hk_embed_dim * (hk_kernel_size ** 2) * hk_input_dim
 
-            gp_covariance_module = KroneckerMarkerCovariance(
-                grid_size=H_gp,
-                marker_embed_dim=marker_embed_dim,
-                hyperkernel_model_dim=hyperkernel_model_dim,
-                kernel_jitter=gp_kernel_jitter,
-                marker_jitter=marker_jitter,
-                spatial_matern_kernel_length_scale=gp_lengthscale,
-                device=device,
-            )
-            gp_covariance_module = gp_covariance_module.to(device)
-        elif use_kronecker_gp:
-            assert H_gp == W_gp, (
-                f"Kronecker GP requires square spatial grid, "
-                f"got {H_gp}x{W_gp}. Adjust input_image_size or gp_downscale_factor."
-            )
-            gp_covariance_module = KroneckerPlusSpatialCovariance(
-                grid_size=H_gp,
-                kernel_jitter=gp_kernel_jitter,
-                spatial_matern_kernel_length_scale=gp_lengthscale,
-                learn_lengthscale=gp_learn_lengthscale,
-                device=device,
-            )
-        else:
-            # CG-based covariance (supports learnable lengthscale)
-            y = torch.linspace(0, 1, H_gp, device=device)
-            x = torch.linspace(0, 1, W_gp, device=device)
-            Y, X = torch.meshgrid(y, x, indexing="ij")
-            grid_coords = torch.stack([Y, X], dim=-1).reshape(-1, 2)
+    gp_covariance_module = KroneckerMarkerCovariance(
+        grid_size=H_gp,
+        marker_embed_dim=marker_embed_dim,
+        hyperkernel_model_dim=hyperkernel_model_dim,
+        kernel_jitter=gp_kernel_jitter,
+        marker_jitter=marker_jitter,
+        spatial_matern_kernel_length_scale=gp_lengthscale,
+        device=device,
+    ).to(device)
 
-            gp_covariance_module = LowRankTimesSpatialCovariance(
-                grid_coords=grid_coords,
-                kernel_jitter=gp_kernel_jitter,
-                spatial_matern_kernel_length_scale=gp_lengthscale,
-                learn_lengthscale=gp_learn_lengthscale,
-                device=device,
-            )
+    gp_loss_fn = HybridKroneckerMarkerGPNLLLoss(
+        covariance_module=gp_covariance_module,
+        lambda_gp=lambda_gp,
+        downscale_factor=gp_downscale_factor,
+        device=device,
+    )
+    print(f"Using Kronecker Marker GP loss with lambda_gp={lambda_gp}")
 
-    # Load checkpoint early to recover total_steps for scheduler reconstruction
     start_epoch = 0
     checkpoint = None
     if config.resolve_checkpoint():
+        assert config.from_checkpoint is not None
         print(f"Loading model from checkpoint: {config.from_checkpoint}")
         checkpoint = torch.load(config.from_checkpoint, map_location=device)
-        model.load_state_dict(checkpoint["model_state_dict"])
-        if gp_covariance_module is not None:
-            if "gp_covariance_state_dict" in checkpoint:
-                gp_covariance_module.load_state_dict(checkpoint["gp_covariance_state_dict"])
-            else:
-                logger.warning(
-                    "Checkpoint missing 'gp_covariance_state_dict' — "
-                    "KroneckerMarkerCovariance starts from random init"
-                )
-        start_epoch = checkpoint["epoch"] + 1
+        model = MultiplexAutoencoder.load_from_checkpoint(
+            checkpoint, model_config=model_config
+        ).to(device)
+        if "gp_covariance_state_dict" in checkpoint:
+            gp_covariance_module.load_state_dict(checkpoint["gp_covariance_state_dict"])
+        else:
+            logger.warning(
+                "Checkpoint missing 'gp_covariance_state_dict' — "
+                "KroneckerMarkerCovariance starts from random init"
+            )
+        start_epoch = checkpoint.get("epoch", -1) + 1
+    else:
+        model = MultiplexAutoencoder(**model_config).to(device)
 
-    # Optimizer and scheduler
-    # When resuming normally, use saved total_steps so scheduler boundaries match original run.
-    # When reset_lr_schedule=True, recalculate from remaining epochs for a fresh cosine cycle
-    # that covers exactly the new training run (config.epochs - start_epoch epochs).
+    # When extending training (bumping config.epochs), use reset_lr_schedule: true to get
+    # a fresh cosine cycle. Without it, total_steps is reused from the checkpoint, and if
+    # config.epochs > original epochs the scheduler may be past its annealing boundary.
     if checkpoint is not None and "total_steps" in checkpoint and not config.reset_lr_schedule:
         total_steps = checkpoint["total_steps"]
     else:
@@ -691,18 +572,9 @@ if __name__ == "__main__":
     num_warmup_steps = int(total_steps * config.frac_warmup_steps)
     num_annealing_steps = total_steps - num_warmup_steps
 
-    # Include GP covariance parameters in optimization if learnable
-    params_to_optimize = list(model.parameters())
-    if use_gp_loss and gp_covariance_module is not None:
-        if use_marker_covariance:
-            params_to_optimize += list(gp_covariance_module.parameters())
-        elif gp_learn_lengthscale:
-            params_to_optimize += list(gp_covariance_module.parameters())
-
+    params_to_optimize = list(model.parameters()) + list(gp_covariance_module.parameters())
     optimizer = optim.AdamW(
-        params_to_optimize,
-        lr=config.peak_lr,
-        weight_decay=config.weight_decay,
+        params_to_optimize, lr=config.peak_lr, weight_decay=config.weight_decay
     )
     scheduler = get_scheduler_with_warmup(
         optimizer,
@@ -714,28 +586,28 @@ if __name__ == "__main__":
     )
 
     if checkpoint is not None and not config.reset_lr_schedule:
-        optimizer.load_state_dict(checkpoint["optimizer_state_dict"])
-        scheduler.load_state_dict(checkpoint["scheduler_state_dict"])
+        if "optimizer_state_dict" in checkpoint:
+            optimizer.load_state_dict(checkpoint["optimizer_state_dict"])
+        if "scheduler_state_dict" in checkpoint:
+            scheduler.load_state_dict(checkpoint["scheduler_state_dict"])
 
-    # Initialize experiment tracking
     comet_config = config.model_dump()
-    comet_config.update({
-        "use_gp_loss":          use_gp_loss,
-        "use_kronecker_gp":     use_kronecker_gp,
-        "lambda_gp":            lambda_gp,
-        "gp_kernel_jitter":     gp_kernel_jitter,
-        "gp_lengthscale":       gp_lengthscale,
-        "gp_max_cg_iterations": gp_max_cg_iterations,
-        "gp_downscale_factor":  gp_downscale_factor,
-        "gp_learn_lengthscale": gp_learn_lengthscale,
-        "use_marker_covariance": use_marker_covariance,
-        "marker_embed_dim":      marker_embed_dim,
-        "marker_jitter":         marker_jitter,
-    })
+    comet_config.update(
+        {
+            "use_gp_loss": use_gp_loss,
+            "use_kronecker_gp": use_kronecker_gp,
+            "use_marker_covariance": use_marker_covariance,
+            "lambda_gp": lambda_gp,
+            "gp_kernel_jitter": gp_kernel_jitter,
+            "gp_lengthscale": gp_lengthscale,
+            "gp_downscale_factor": gp_downscale_factor,
+            "marker_embed_dim": marker_embed_dim,
+            "marker_jitter": marker_jitter,
+        }
+    )
     init_experiment(comet_config)
 
-    # Train the model
-    train_masked_gp(
+    train_masked_learnmask_gp(
         model,
         optimizer,
         scheduler,
@@ -744,11 +616,9 @@ if __name__ == "__main__":
         device,
         marker_names_map=INV_TOKENIZER,
         gp_covariance_module=gp_covariance_module,
+        gp_loss_fn=gp_loss_fn,
+        total_steps=total_steps,
         use_gp_loss=use_gp_loss,
-        use_marker_covariance=use_marker_covariance,
-        lambda_gp=lambda_gp,
-        gp_max_cg_iterations=gp_max_cg_iterations,
-        gp_downscale_factor=gp_downscale_factor,
         epochs=config.epochs,
         start_epoch=start_epoch,
         gradient_accumulation_steps=config.gradient_accumulation_steps,

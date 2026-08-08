@@ -13,6 +13,7 @@ from .configuration import (
 from .masking import (
     apply_channel_masking,
     apply_spatial_masking,
+    get_pixel_mask,
 )
 from .optim import (
     ClampWithGrad,
@@ -25,6 +26,7 @@ from .train_logging import (
     get_run_name,
     init_experiment,
     log_training_metrics,
+    log_validation_batch_metrics,
     log_validation_images,
     log_validation_metrics,
     plot_reconstructs_with_masks,
@@ -41,11 +43,13 @@ __all__ = [
     # Masking
     "apply_channel_masking",
     "apply_spatial_masking",
+    "get_pixel_mask",
     # Logging
     "plot_reconstructs_with_uncertainty",
     "plot_reconstructs_with_masks",
     "init_experiment",
     "log_training_metrics",
+    "log_validation_batch_metrics",
     "log_validation_metrics",
     "log_validation_images",
     "get_run_name",

@@ -10,15 +10,15 @@ class ClampWithGrad(torch.autograd.Function):
     """Custom autograd function for clamping with smooth gradients."""
 
     @staticmethod
-    def forward(ctx, x, min_val=-15.0, max_val=15.0):
+    def forward(ctx: torch.autograd.function.FunctionCtx, x: torch.Tensor, min_val: float = -15.0, max_val: float = 15.0) -> torch.Tensor:  # type: ignore[override]
         ctx.save_for_backward(x)
-        ctx.min_val, ctx.max_val = min_val, max_val
+        ctx.min_val, ctx.max_val = min_val, max_val  # type: ignore[attr-defined,misc]
         return x.clamp(min_val, max_val)
 
     @staticmethod
-    def backward(ctx, grad_output):
-        (x,) = ctx.saved_tensors
-        min_val, max_val = ctx.min_val, ctx.max_val
+    def backward(ctx: torch.autograd.function.FunctionCtx, grad_output: torch.Tensor) -> tuple[torch.Tensor, None, None]:  # type: ignore[override]
+        (x,) = ctx.saved_tensors  # type: ignore[attr-defined,misc]
+        min_val, max_val = ctx.min_val, ctx.max_val  # type: ignore[attr-defined]
 
         grad_input = grad_output.clone()
         tanh_x = torch.tanh(x)
@@ -58,7 +58,7 @@ def get_scheduler_with_warmup(
     """
     final_lr_mult = final_lr / peak_lr
 
-    def lr_lambda(current_step, type: Literal["cosine", "linear"] = "cosine"):
+    def lr_lambda(current_step: int, type: Literal["cosine", "linear"] = "cosine") -> float:
         if current_step < num_warmup_steps:
             return float(max(1, current_step)) / float(max(1, num_warmup_steps))
         elif current_step >= num_annealing_steps + num_warmup_steps:

@@ -1,6 +1,7 @@
 import math
 import os
 import sys
+from typing import Any
 
 import comet_ml  # noqa: F401
 import matplotlib.pyplot as plt
@@ -27,13 +28,12 @@ from multiplex_model.utils import (
     ClampWithGrad,
     TrainingConfig,
     apply_channel_masking,
-    apply_spatial_masking,
+    get_pixel_mask,
     finish_experiment,
     get_run_name,
     get_scheduler_with_warmup,
     init_experiment,
     log_training_metrics,
-    log_validation_batch_metrics,
     log_validation_images,
     log_validation_metrics,
     plot_reconstructs_with_masks,
@@ -87,12 +87,12 @@ def train_masked(
             )
 
             # Apply spatial masking
-            masked_img, _ = apply_spatial_masking(
+            pixel_mask = get_pixel_mask(
                 masked_img, spatial_masking_ratio, mask_patch_size
             )
 
             with autocast(device_type="cuda", dtype=torch.bfloat16):
-                output = model(masked_img, active_channel_ids, channel_ids)["output"]
+                output = model(masked_img, active_channel_ids, channel_ids, spatial_mask=pixel_mask)["output"]
                 mi, logvar = output.unbind(dim=-1)
                 mi = torch.sigmoid(mi)
                 logvar = ClampWithGrad.apply(logvar, -15.0, 15.0)
@@ -108,6 +108,7 @@ def train_masked(
                 scaler.update()
                 optimizer.zero_grad()
                 scheduler.step()
+                mask_token = model.encoder.mask_token.item() if model.encoder.mask_token is not None else None
 
                 log_training_metrics(
                     loss=loss.item(),
@@ -117,6 +118,7 @@ def train_masked(
                     mae=torch.abs(img - mi).mean().item(),
                     mse=torch.square(img - mi).mean().item(),
                     step=step,
+                    mask_token=mask_token,
                 )
                 step += 1
 
@@ -137,6 +139,8 @@ def train_masked(
             "scheduler_state_dict": scheduler.state_dict(),
             "epoch": epoch,
         }
+        if hasattr(model, "get_architecture_config"):
+            checkpoint["model_config"] = model.get_architecture_config()
         if (epoch + 1) % save_checkpoint_every == 0:
             torch.save(
                 checkpoint,
@@ -149,6 +153,8 @@ def train_masked(
     checkpoint = {
         "model_state_dict": model.state_dict(),
     }
+    if hasattr(model, "get_architecture_config"):
+        checkpoint["model_config"] = model.get_architecture_config()
     torch.save(checkpoint, final_model_path)
 
 
@@ -172,10 +178,9 @@ def test_masked(
     )
     plot_indices = set(plot_indices)
 
-    all_latents = []
-    all_channel_variances = []
-    all_channel_maes = []
-    all_channel_mses = []
+    all_latents: list[torch.Tensor] = []
+    all_channel_variances: list[torch.Tensor] = []
+    all_channel_maes: list[torch.Tensor] = []
 
     with torch.no_grad():
         for idx, (img, channel_ids, panel_idx, img_path) in enumerate(
@@ -193,11 +198,9 @@ def test_masked(
             )
 
             # Apply spatial masking
-            masked_img, pixel_mask = apply_spatial_masking(
-                masked_img, spatial_masking_ratio, mask_patch_size
-            )
+            pixel_mask = get_pixel_mask(masked_img, spatial_masking_ratio, mask_patch_size)
 
-            latent = model.encode(masked_img, active_channel_ids)["output"]
+            latent = model.encode(masked_img, active_channel_ids, spatial_mask=pixel_mask)["output"]
             output = model.decode(latent, channel_ids)
             mi, logvar = output.unbind(dim=-1)
             mi = torch.sigmoid(mi)
@@ -210,19 +213,8 @@ def test_masked(
                 dim=(0, 2, 3)
             )  # Mean variance per channel
             mae_per_channel = torch.abs(img - mi).mean(dim=(0, 2, 3))  # MAE per channel
-            mse_per_channel = torch.square(img - mi).mean(dim=(0, 2, 3))  # MSE per channel
             all_channel_variances.append(variance_per_channel.cpu())
             all_channel_maes.append(mae_per_channel.cpu())
-            all_channel_mses.append(mse_per_channel.cpu())
-
-            batch_var_mse_corr = torch.corrcoef(
-                torch.stack([variance_per_channel.cpu(), mse_per_channel.cpu()])
-            )[0, 1].item()
-            if math.isfinite(batch_var_mse_corr):
-                log_validation_batch_metrics(
-                    variance_mse_correlation_per_batch=batch_var_mse_corr,
-                    step=epoch * len(test_dataloader) + idx,
-                )
 
             loss = nll_loss(img, mi, logvar)
             running_loss += loss.item()
@@ -260,19 +252,18 @@ def test_masked(
     val_mae = running_mae / len(test_dataloader)
     val_mse = running_mse / len(test_dataloader)
 
-    latents = torch.cat(all_latents)
-    rankme = RankMe(latents)
+    latents_cat = torch.cat(all_latents)
+    rankme = RankMe(latents_cat)
 
-    # Calculate Pearson correlation between predicted variances and MAEs/MSEs per channel
-    all_variances = torch.cat(all_channel_variances)
-    all_maes = torch.cat(all_channel_maes)
-    all_mses = torch.cat(all_channel_mses)
+    # Calculate Pearson correlation between predicted variances and MAEs per channel
+    channel_variances_cat = torch.cat(all_channel_variances)
+    channel_maes_cat = torch.cat(all_channel_maes)
+    # Calculate Pearson correlation using flattened data across all batches
     variance_mae_corr = torch.corrcoef(
-        torch.stack([all_variances.flatten(), all_maes.flatten()])
+        torch.stack([channel_variances_cat.flatten(), channel_maes_cat.flatten()])
     )[0, 1].item()
-    variance_mse_corr = torch.corrcoef(
-        torch.stack([all_variances.flatten(), all_mses.flatten()])
-    )[0, 1].item()
+    if not math.isfinite(variance_mae_corr):
+        variance_mae_corr = float("nan")
 
     val_metrics = {
         "val_loss": val_loss,
@@ -280,7 +271,6 @@ def test_masked(
         "val_mse": val_mse,
         "latent_rankme": rankme,
         "variance_mae_correlation": variance_mae_corr,
-        "variance_mse_correlation": variance_mse_corr,
         "epoch": epoch,
     }
 
@@ -291,7 +281,6 @@ def test_masked(
     print(f"MAE: {val_mae:.6f}")
     print(f"MSE: {val_mse:.6f}")
     print(f"Pearson MAE vs Var: {variance_mae_corr:.4f}")
-    print(f"Pearson MSE vs Var: {variance_mse_corr:.4f}")
     print("=" * 90)
     print()
 
@@ -334,7 +323,7 @@ if __name__ == "__main__":
         split="train",
         marker_tokenizer=TOKENIZER,
         transform=train_transform,
-        use_preprocessing=False,  # saved data is already preprocessed
+        use_preprocessing=False,
         use_median_denoising=False,
         use_butterworth_filter=True,
         use_minmax_normalization=False,
@@ -347,7 +336,7 @@ if __name__ == "__main__":
         split="test",
         marker_tokenizer=TOKENIZER,
         transform=test_transform,
-        use_preprocessing=False,  # saved data is already preprocessed
+        use_preprocessing=False,
         use_median_denoising=False,
         use_butterworth_filter=True,
         use_minmax_normalization=False,
@@ -377,11 +366,26 @@ if __name__ == "__main__":
 
     # Build model configuration
     num_channels = len(TOKENIZER)
-    model = MultiplexAutoencoder(
-        num_channels=num_channels,
-        encoder_config=config.encoder_config.model_dump(),
-        decoder_config=config.decoder_config.model_dump(),
-    ).to(device)
+    model_config: dict[str, Any] = {
+        "num_channels": num_channels,
+        "encoder_config": config.encoder_config.model_dump(),
+        "decoder_config": config.decoder_config.model_dump(),
+    }
+
+    # Load checkpoint if specified
+    start_epoch = 0
+    checkpoint = None
+    if config.resolve_checkpoint():
+        assert config.from_checkpoint is not None
+        print(f"Loading model from checkpoint: {config.from_checkpoint}")
+        checkpoint = torch.load(config.from_checkpoint, map_location=device)
+        model = MultiplexAutoencoder.load_from_checkpoint(
+            checkpoint,
+            model_config=model_config,
+        ).to(device)
+        start_epoch = checkpoint.get("epoch", -1) + 1
+    else:
+        model = MultiplexAutoencoder(**model_config).to(device)
 
     # Setup optimizer and scheduler
     total_steps = (
@@ -402,19 +406,15 @@ if __name__ == "__main__":
         type="cosine",
     )
 
+    if checkpoint is not None:
+        if "optimizer_state_dict" in checkpoint:
+            optimizer.load_state_dict(checkpoint["optimizer_state_dict"])
+        if "scheduler_state_dict" in checkpoint:
+            scheduler.load_state_dict(checkpoint["scheduler_state_dict"])
+
     # Initialize Comet.ml experiment
     comet_config = config.model_dump()
     init_experiment(comet_config)
-
-    # Load checkpoint if specified
-    start_epoch = 0
-    if config.resolve_checkpoint():
-        print(f"Loading model from checkpoint: {config.from_checkpoint}")
-        checkpoint = torch.load(config.from_checkpoint, map_location=device)
-        model.load_state_dict(checkpoint["model_state_dict"])
-        optimizer.load_state_dict(checkpoint["optimizer_state_dict"])
-        scheduler.load_state_dict(checkpoint["scheduler_state_dict"])
-        start_epoch = checkpoint["epoch"] + 1
 
     # Train the model
     train_masked(
