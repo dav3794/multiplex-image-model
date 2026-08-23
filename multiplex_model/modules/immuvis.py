@@ -604,7 +604,7 @@ class MultiplexAutoencoder(nn.Module):
         if isinstance(checkpoint, dict):
             checkpoint_data = checkpoint
         else:
-            checkpoint_data = torch.load(checkpoint, map_location=map_location)
+            checkpoint_data = torch.load(checkpoint, map_location=map_location, weights_only=False)
 
         resolved_config = checkpoint_data.get("model_config", model_config)
         if resolved_config is None:
