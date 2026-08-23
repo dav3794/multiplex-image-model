@@ -1,6 +1,8 @@
 import copy
+import os
 from typing import Literal
 
+import numpy as np
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
@@ -9,10 +11,88 @@ from .base_modules import Block, Encoder, Identity, LayerNorm
 from .registry import resolve_block_class, resolve_encoder_class
 
 
+def load_marker_embeddings(
+    source: str | np.ndarray | torch.Tensor,
+) -> torch.Tensor:
+    """Load a precomputed marker embedding table.
+
+    Args:
+        source: Either an in-memory table or a path to a `.npy`/`.pt` file holding a
+            dense (vocabulary_size, embedding_dim) matrix. Row order must match the
+            marker indices produced by the tokenizer.
+
+    Returns:
+        torch.Tensor: Float32 embedding table of shape (vocabulary_size, embedding_dim).
+    """
+    if isinstance(source, str):
+        path = os.path.expanduser(source)
+        if not os.path.exists(path):
+            raise ValueError(f"Marker embeddings not found: {path}")
+        if path.endswith(".npy"):
+            table = torch.from_numpy(np.load(path))
+        elif path.endswith((".pt", ".pth")):
+            table = torch.load(path, map_location="cpu")
+        else:
+            raise ValueError(
+                f"Unsupported marker embeddings format: {path}. Use '.npy' or '.pt'."
+            )
+    elif isinstance(source, np.ndarray):
+        table = torch.from_numpy(source)
+    else:
+        table = source
+
+    if not isinstance(table, torch.Tensor) or table.ndim != 2:
+        raise ValueError(
+            "Marker embeddings must be a 2D (vocabulary_size, embedding_dim) tensor."
+        )
+
+    return table.detach().to(torch.float32).contiguous()
+
+
+def build_marker_projector(
+    input_dim: int,
+    output_dim: int,
+    hidden_dim: int | None = None,
+    num_layers: int = 2,
+    zero_init_output: bool = False,
+) -> nn.Sequential:
+    """Build an MLP projecting external marker embeddings.
+
+    Args:
+        input_dim: Dimension of the external marker embeddings.
+        output_dim: Dimension of the produced coefficients (the hyperkernel rank).
+        hidden_dim: Hidden dimension of the MLP; defaults to `input_dim`.
+        num_layers: Total number of linear layers (>= 1).
+        zero_init_output: Whether to initialize the final projection to zero.
+
+    Returns:
+        nn.Sequential: Projector applied to embeddings of shape (..., input_dim).
+    """
+    if num_layers < 1:
+        raise ValueError("`num_layers` must be at least 1 for the marker projector.")
+
+    hidden_dim = hidden_dim or input_dim
+    layers: list[nn.Module] = [nn.LayerNorm(input_dim)]
+    dim = input_dim
+    for _ in range(num_layers - 1):
+        layers += [nn.Linear(dim, hidden_dim), nn.GELU()]
+        dim = hidden_dim
+
+    final_layer = nn.Linear(dim, output_dim)
+    if zero_init_output:
+        nn.init.zeros_(final_layer.weight)
+    else:
+        nn.init.normal_(final_layer.weight, std=dim**-0.5)
+    nn.init.zeros_(final_layer.bias)
+    layers.append(final_layer)
+
+    return nn.Sequential(*layers)
+
+
 class Hyperkernel(nn.Module):
     def __init__(
         self,
-        num_channels: int,
+        num_channels: int | None,
         input_dim: int,
         embedding_dim: int,
         module_type: Literal["encoder", "decoder"],
@@ -22,11 +102,16 @@ class Hyperkernel(nn.Module):
         use_bias: bool = True,
         low_rank: bool = False,
         rank: int | None = None,
+        marker_embeddings: str | np.ndarray | torch.Tensor | None = None,
+        projector_hidden_dim: int | None = None,
+        projector_num_layers: int = 2,
     ):
         """Initialize the Hyperkernel model
 
         Args:
-            num_channels (int): Number of channels in the input tensor
+            num_channels (int, optional): Number of channels in the input tensor.
+                Only used for the learnable per-marker tables; may be None when
+                `marker_embeddings` is provided (unbounded marker vocabulary).
             input_dim (int): Input dimension of each channel
             embedding_dim (int): Embedding dimension for the input tensor
             module_type (Literal['encoder', 'decoder']): Whether the Hyperkernel is used in encoder or decoder
@@ -41,6 +126,18 @@ class Hyperkernel(nn.Module):
                 Defaults to False.
             rank (int, optional): Number of shared basis components. Required when
                 low_rank is True. Defaults to None.
+            marker_embeddings (str | np.ndarray | torch.Tensor, optional): Precomputed
+                marker embeddings (e.g. from an LLM) as a dense
+                (vocabulary_size, embedding_dim) table, or a path to a `.npy`/`.pt` file
+                holding it. Rows are addressed by the marker indices coming from the
+                tokenizer. When given, the learnable per-marker tables are replaced by an
+                MLP projecting these embeddings to the low-rank coefficients (and to the
+                decoder bias), so the marker vocabulary is unbounded. Requires
+                low_rank=True. Defaults to None.
+            projector_hidden_dim (int, optional): Hidden dimension of the projector MLP.
+                Defaults to the external embedding dimension.
+            projector_num_layers (int, optional): Number of linear layers in the projector
+                MLP. Defaults to 2.
         """
         super(Hyperkernel, self).__init__()
         self.embedding_dim = embedding_dim
@@ -60,19 +157,45 @@ class Hyperkernel(nn.Module):
         self.model_dim = self.out_dim * self.input_dim
 
         self.low_rank = low_rank
+        self.use_marker_embeddings = marker_embeddings is not None
+        if self.use_marker_embeddings and not low_rank:
+            raise ValueError(
+                "`marker_embeddings` requires `low_rank=True`; the projected embedding "
+                "is used as the low-rank coefficient vector."
+            )
+        if not self.use_marker_embeddings and num_channels is None:
+            raise ValueError(
+                "`num_channels` is required when no `marker_embeddings` are provided."
+            )
+
+        if self.use_marker_embeddings:
+            table = load_marker_embeddings(marker_embeddings)
+            # Non-persistent: the table is precomputed and reloaded from disk, so it
+            # stays out of checkpoints and the vocabulary can grow after training.
+            self.register_buffer("marker_embedding_table", table, persistent=False)
+            self.marker_embedding_dim = table.shape[1]
+
         if low_rank:
             if rank is None or rank <= 0:
                 raise ValueError(
                     "`rank` must be a positive integer when `low_rank` is True."
                 )
             self.rank = rank
-            # Per-marker coefficients over a shared basis of weight matrices.
-            self.hyperkernel_coeff = nn.Embedding(num_channels, rank)
             self.hyperkernel_basis = nn.Parameter(torch.empty(rank, self.model_dim))
             # Init so that initial per-marker weights match the std of the
             # full-rank nn.Embedding (~N(0, 1)) elementwise.
-            nn.init.normal_(self.hyperkernel_coeff.weight)
             nn.init.normal_(self.hyperkernel_basis, std=rank**-0.5)
+            if self.use_marker_embeddings:
+                self.coeff_projector = build_marker_projector(
+                    self.marker_embedding_dim,
+                    rank,
+                    hidden_dim=projector_hidden_dim,
+                    num_layers=projector_num_layers,
+                )
+            else:
+                # Per-marker coefficients over a shared basis of weight matrices.
+                self.hyperkernel_coeff = nn.Embedding(num_channels, rank)
+                nn.init.normal_(self.hyperkernel_coeff.weight)
         else:
             self.rank = None
             self.hyperkernel_weights = nn.Embedding(num_channels, self.model_dim)
@@ -82,6 +205,14 @@ class Hyperkernel(nn.Module):
             if module_type == "encoder":
                 self.hyperkernel_bias = nn.Parameter(
                     torch.zeros(1, self.embedding_dim, 1, 1)
+                )
+            elif self.use_marker_embeddings:
+                self.hyperkernel_bias = build_marker_projector(
+                    self.marker_embedding_dim,
+                    self.embedding_dim,
+                    hidden_dim=projector_hidden_dim,
+                    num_layers=projector_num_layers,
+                    zero_init_output=True,
                 )
             else:
                 self.hyperkernel_bias = nn.Embedding(num_channels, self.embedding_dim)
@@ -106,8 +237,15 @@ class Hyperkernel(nn.Module):
         CI = C * I
         spatial_shape = x.shape[-2:]
 
+        marker_embeds = None
+        if self.use_marker_embeddings:
+            marker_embeds = self.marker_embedding_table[indices]  # (B, C, D)
+
         if self.low_rank:
-            coeff = self.hyperkernel_coeff(indices).to(x.dtype)  # (B, C, R)
+            if self.use_marker_embeddings:
+                coeff = self.coeff_projector(marker_embeds).to(x.dtype)  # (B, C, R)
+            else:
+                coeff = self.hyperkernel_coeff(indices).to(x.dtype)  # (B, C, R)
             weights = coeff @ self.hyperkernel_basis.to(x.dtype)  # (B, C, I*O)
         else:
             weights = self.hyperkernel_weights(indices).to(x.dtype)  # (B, C, I*O)
@@ -161,7 +299,10 @@ class Hyperkernel(nn.Module):
                 x = torch.einsum("bihw, bcie -> bcehw", x, weights)
 
             if self.use_bias:
-                channel_biases = self.hyperkernel_bias(indices)  # [B, C, E]
+                if self.use_marker_embeddings:
+                    channel_biases = self.hyperkernel_bias(marker_embeds).to(x.dtype)
+                else:
+                    channel_biases = self.hyperkernel_bias(indices)  # [B, C, E]
                 channel_biases = channel_biases.unsqueeze(-1).unsqueeze(
                     -1
                 )  # [B, C, E, 1, 1]
@@ -470,7 +611,21 @@ class MultiplexAutoencoder(nn.Module):
                 "share_hyperkernel_coeff requires matching ranks for the encoder "
                 f"({encoder_hk.rank}) and decoder ({decoder_hk.rank}) hyperkernels."
             )
-        decoder_hk.hyperkernel_coeff = encoder_hk.hyperkernel_coeff
+        if encoder_hk.use_marker_embeddings != decoder_hk.use_marker_embeddings:
+            raise ValueError(
+                "share_hyperkernel_coeff requires the encoder and decoder hyperkernels "
+                "to both use (or both not use) external marker embeddings."
+            )
+        if encoder_hk.use_marker_embeddings:
+            if encoder_hk.marker_embedding_dim != decoder_hk.marker_embedding_dim:
+                raise ValueError(
+                    "share_hyperkernel_coeff requires matching marker embedding "
+                    f"dimensions for the encoder ({encoder_hk.marker_embedding_dim}) "
+                    f"and decoder ({decoder_hk.marker_embedding_dim}) hyperkernels."
+                )
+            decoder_hk.coeff_projector = encoder_hk.coeff_projector
+        else:
+            decoder_hk.hyperkernel_coeff = encoder_hk.hyperkernel_coeff
 
     def get_architecture_config(self, by_alias: bool = False) -> dict:
         """Return the model architecture configuration.
@@ -500,6 +655,7 @@ class MultiplexAutoencoder(nn.Module):
         checkpoint: str | dict,
         map_location: str | torch.device | None = None,
         model_config: dict | None = None,
+        marker_embeddings: str | None = None,
         strict: bool = True,
     ) -> "MultiplexAutoencoder":
         """Create a model and load weights from a checkpoint.
@@ -508,6 +664,8 @@ class MultiplexAutoencoder(nn.Module):
             checkpoint: Path to checkpoint file or loaded checkpoint dict.
             map_location: Optional map_location passed to torch.load when checkpoint is a path.
             model_config: Model config to use if checkpoint lacks 'model_config'.
+            marker_embeddings: Optional path overriding the external marker embedding
+                table in both encoder and decoder hyperkernel configurations.
             strict: Whether to strictly enforce that the keys in state_dict match the model.
 
         Returns:
@@ -516,13 +674,22 @@ class MultiplexAutoencoder(nn.Module):
         if isinstance(checkpoint, dict):
             checkpoint_data = checkpoint
         else:
-            checkpoint_data = torch.load(checkpoint, map_location=map_location)
+            checkpoint_data = torch.load(checkpoint, map_location=map_location, weights_only=True)
 
         resolved_config = checkpoint_data.get("model_config", model_config)
         if resolved_config is None:
             raise ValueError(
                 "Checkpoint is missing 'model_config'; provide model_config to load the model."
             )
+
+        resolved_config = copy.deepcopy(resolved_config)
+        if marker_embeddings is not None:
+            resolved_config["encoder_config"]["hyperkernel_config"][
+                "marker_embeddings"
+            ] = marker_embeddings
+            resolved_config["decoder_config"]["hyperkernel_config"][
+                "marker_embeddings"
+            ] = marker_embeddings
 
         model = cls(**resolved_config)
         model.load_state_dict(checkpoint_data["model_state_dict"], strict=strict)

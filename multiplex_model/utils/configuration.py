@@ -63,12 +63,36 @@ class HyperkernelConfig(BaseModel):
         gt=0,
         description="Number of shared basis components; required when low_rank is True",
     )
+    marker_embeddings: str | None = Field(
+        None,
+        description=(
+            "Path to a precomputed (vocabulary_size, embedding_dim) marker embedding "
+            "table ('.npy' or '.pt'), indexed by tokenizer marker ids. When set, the "
+            "per-marker coefficients are produced by an MLP instead of a learnable "
+            "table; requires low_rank=True"
+        ),
+    )
+    projector_hidden_dim: int | None = Field(
+        None,
+        gt=0,
+        description="Hidden dimension of the marker embedding projector MLP",
+    )
+    projector_num_layers: int = Field(
+        2, gt=0, description="Number of linear layers in the marker embedding projector"
+    )
 
     @field_validator("rank")
     @classmethod
     def validate_rank(cls, v: int | None, info) -> int | None:
         if info.data.get("low_rank") and v is None:
             raise ValueError("`rank` must be set when `low_rank` is True")
+        return v
+
+    @field_validator("marker_embeddings")
+    @classmethod
+    def validate_marker_embeddings(cls, v: str | None, info) -> str | None:
+        if v is not None and not info.data.get("low_rank"):
+            raise ValueError("`marker_embeddings` requires `low_rank` to be True")
         return v
 
     model_config = ConfigDict(extra="forbid")
