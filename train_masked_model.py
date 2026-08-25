@@ -72,8 +72,8 @@ def train_masked(
         for batch_idx, (img, channel_ids, panel_idx, img_path) in enumerate(
             tqdm(train_dataloader, desc=f"Epoch {epoch}")
         ):
-            img = img.to(device, dtype=torch.float32)
-            channel_ids = channel_ids.to(device, dtype=torch.long)
+            img = img.to(device, dtype=torch.float32, non_blocking=True)
+            channel_ids = channel_ids.to(device, dtype=torch.long, non_blocking=True)
 
             # Apply channel masking with channel subset sampling
             img, channel_ids, masked_img, active_channel_ids = apply_channel_masking(
@@ -171,7 +171,9 @@ def test_masked(
     running_mse = 0.0
     num_batches = len(test_dataloader)
     if num_batches == 0:
-        print(f"Warning: test_dataloader is empty; skipping validation for epoch {epoch}.")
+        print(
+            f"Warning: test_dataloader is empty; skipping validation for epoch {epoch}."
+        )
         return
 
     num_plots = min(num_plots, num_batches)
