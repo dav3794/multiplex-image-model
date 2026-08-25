@@ -7,9 +7,6 @@ from .configuration import (
     DINOTrainingConfig,
     EncoderConfig,
     HyperkernelConfig,
-    IBOTHeadConfig,
-    IBOTPredictorConfig,
-    IBOTTrainingConfig,
     ModuleConfig,
     FinetuneConfig,
     TrainingConfig,
@@ -22,6 +19,7 @@ from .masking import (
 )
 from .optim import (
     ClampWithGrad,
+    cosine_schedule_at,
     get_scheduler_with_warmup,
 )
 
@@ -45,9 +43,6 @@ __all__ = [
     "DecoderConfig",
     "DINOHeadConfig",
     "DINOTrainingConfig",
-    "IBOTHeadConfig",
-    "IBOTPredictorConfig",
-    "IBOTTrainingConfig",
     "FinetuneConfig",
     "TrainingConfig",
     # Masking
@@ -64,5 +59,6 @@ __all__ = [
     "finish_experiment",
     # Optim
     "ClampWithGrad",
+    "cosine_schedule_at",
     "get_scheduler_with_warmup",
 ]

@@ -1,9 +1,4 @@
-"""DINO projection head for self-distillation training.
-
-Implements the DINO/DINOv2 projection head that maps a pooled feature vector to a
-distribution over ``out_dim`` prototypes. iBOT (patch-level) heads are intentionally
-omitted; only the global (CLS-equivalent) head is provided here.
-"""
+"""DINO projection head for self-distillation training."""
 
 import torch
 import torch.nn as nn
@@ -97,66 +92,3 @@ class DINOHead(nn.Module):
         x = F.normalize(x, dim=-1, p=2)
         x = self.last_layer(x)
         return x
-
-
-class DINOvMFHead(nn.Module):
-    """Continuous MLP projection head for the vMF iBOT objective.
-
-    Produces an unnormalized ``out_dim``-dimensional continuous projection (no discrete
-    prototype layer). Shared architecture between student and EMA teacher.
-    L2-normalization and centering are applied later in the loss. Operates on the last
-    dimension, so it supports both pooled inputs ``[B, in_dim]`` and dense per-cell
-    inputs ``[B, N, in_dim]``.
-    """
-
-    def __init__(
-        self,
-        in_dim: int,
-        out_dim: int = 256,
-        hidden_dim: int = 2048,
-        n_layers: int = 3,
-    ):
-        """Initialize the vMF projection head.
-
-        Args:
-            in_dim (int): Dimension of the input feature vector.
-            out_dim (int, optional): Dimension of the continuous projection (the vMF
-                hypersphere dimension D). Defaults to 256.
-            hidden_dim (int, optional): Hidden dimension of the MLP. Defaults to 2048.
-            n_layers (int, optional): Number of MLP layers (>=1). Defaults to 3.
-        """
-        super().__init__()
-        self.mlp = build_mlp(in_dim, out_dim, hidden_dim, n_layers)
-        self.apply(_init_linear)
-
-    def forward(self, x: torch.Tensor) -> torch.Tensor:
-        """Project features to a continuous vMF-space vector (applied on the last dim)."""
-        return self.mlp(x)
-
-
-class VMFPredictor(nn.Module):
-    """Student-only predictor producing vMF parameters (mean direction + concentration).
-
-    Maps a projection of dimension ``dim`` to ``dim + 1`` outputs: the first ``dim`` are
-    the unnormalized mean direction and the last is the raw concentration scalar (mapped
-    to a positive concentration via softplus inside the loss). This head is BYOL/SimSiam
-    style and is applied only on the student; the EMA teacher does not use it. Operates on
-    the last dimension, supporting pooled ``[B, dim]`` and dense ``[B, N, dim]`` inputs.
-    """
-
-    def __init__(self, dim: int, hidden_dim: int = 2048, n_layers: int = 2):
-        """Initialize the vMF predictor.
-
-        Args:
-            dim (int): Dimension of the vMF projection space (D). The output is dim + 1.
-            hidden_dim (int, optional): Hidden dimension of the MLP. Defaults to 2048.
-            n_layers (int, optional): Number of MLP layers (>=1). Defaults to 2.
-        """
-        super().__init__()
-        self.dim = dim
-        self.mlp = build_mlp(dim, dim + 1, hidden_dim, n_layers)
-        self.apply(_init_linear)
-
-    def forward(self, x: torch.Tensor) -> torch.Tensor:
-        """Predict vMF parameters; returns ``[..., dim + 1]`` (mean ++ raw concentration)."""
-        return self.mlp(x)

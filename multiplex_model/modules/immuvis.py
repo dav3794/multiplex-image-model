@@ -6,7 +6,7 @@ import torch.nn as nn
 import torch.nn.functional as F
 
 from .base_modules import Block, Encoder, Identity, LayerNorm
-from .dino import DINOHead, DINOvMFHead, VMFPredictor
+from .dino import DINOHead
 from .registry import resolve_block_class, resolve_encoder_class
 
 
@@ -188,10 +188,6 @@ class MultiplexImageEncoder(nn.Module):
         encoder_type: str | type[Encoder] | dict = "convnext",
         dino_head: bool = False,
         dino_head_config: dict | None = None,
-        ibot_head: bool = False,
-        ibot_head_config: dict | None = None,
-        ibot_mode: Literal["pooled", "dense"] = "dense",
-        ibot_predictor_config: dict | None = None,
     ):
         """Initialize the Multiplex Image Encoder.
 
@@ -213,17 +209,6 @@ class MultiplexImageEncoder(nn.Module):
             dino_head (bool, optional): Whether to include a projection head after the encoder. Defaults to False.
             dino_head_config (dict, optional): Keyword arguments for the DINOHead (e.g. out_dim,
                 hidden_dim, bottleneck_dim). Only used when dino_head is True. Defaults to None.
-            ibot_head (bool, optional): Whether to include a continuous vMF projection head
-                (DINOvMFHead) for the vMF iBOT objective. Defaults to False.
-            ibot_head_config (dict, optional): Keyword arguments for the DINOvMFHead (e.g.
-                out_dim, hidden_dim, n_layers). Only used when ibot_head is True. Defaults to None.
-            ibot_mode (Literal["pooled", "dense"], optional): What the vMF iBOT head consumes.
-                "pooled" projects only the global-average-pooled latent; "dense" additionally
-                projects every latent cell. Only used when ibot_head is True. Defaults to "dense".
-            ibot_predictor_config (dict, optional): Keyword arguments for the student-only vMF
-                predictor (VMFPredictor, e.g. hidden_dim, n_layers). The predictor is part of the
-                model so the learned concentration (kappa) is checkpointed and reusable downstream.
-                Only used when ibot_head is True. Defaults to None.
         """
         super().__init__()
 
@@ -287,20 +272,6 @@ class MultiplexImageEncoder(nn.Module):
             self.post_pool_norm = nn.LayerNorm(latent_dim)
             self.dino_head = DINOHead(in_dim=latent_dim, **(dino_head_config or {}))
 
-        self.use_ibot_head = ibot_head
-        if ibot_head:
-            # LayerNorm applied on the channel dimension (last dim) of both the pooled
-            # latent and each latent cell before the continuous vMF projection head.
-            self.ibot_mode = ibot_mode
-            self.ibot_norm = nn.LayerNorm(latent_dim)
-            self.ibot_head = DINOvMFHead(in_dim=latent_dim, **(ibot_head_config or {}))
-            # Student-only predictor; kept in the model so the predicted concentration
-            # (kappa) is checkpointed and can be reused after pretraining.
-            ibot_out_dim = (ibot_head_config or {}).get("out_dim", 256)
-            self.ibot_predictor = VMFPredictor(
-                dim=ibot_out_dim, **(ibot_predictor_config or {})
-            )
-
     def forward(
         self,
         x: torch.Tensor,
@@ -308,8 +279,6 @@ class MultiplexImageEncoder(nn.Module):
         spatial_mask: torch.Tensor | None = None,
         return_features: bool = False,
         return_dino_proj: bool = False,
-        return_ibot_proj: bool = False,
-        return_ibot_pred: bool = False,
     ) -> dict:
         """Forward pass of the encoder.
 
@@ -320,13 +289,6 @@ class MultiplexImageEncoder(nn.Module):
             return_features (bool, optional): If True, returns the features after each block. Defaults to False.
             return_dino_proj (bool, optional): If True, returns the output of the projection head on global average pooled
                 latent. Defaults to False.
-            return_ibot_proj (bool, optional): If True, returns the continuous vMF projection of the
-                global-average-pooled latent (under 'ibot_cls', [B, D]) and, in "dense" ibot_mode,
-                of every latent cell (under 'ibot_patch', [B, H*W, D]). Defaults to False.
-            return_ibot_pred (bool, optional): If True, additionally runs the student vMF predictor
-                on the projection and returns the vMF parameters (mean direction ++ raw concentration
-                kappa) under 'ibot_cls_pred' ([B, D+1]) and, in "dense" mode, 'ibot_patch_pred'
-                ([B, H*W, D+1]). Defaults to False.
 
         Returns:
             dict: A dictionary containing the output tensor and optionally the features.
@@ -367,32 +329,6 @@ class MultiplexImageEncoder(nn.Module):
             pooled = self.post_pool_norm(x.mean(dim=[2, 3]))
             outputs["cls"] = self.dino_head(pooled)
 
-        if return_ibot_proj or return_ibot_pred:
-            if not self.use_ibot_head:
-                raise ValueError(
-                    "return_ibot_proj/return_ibot_pred is True, but the encoder was not "
-                    "initialized with ibot_head=True."
-                )
-            # Dense per-cell projection is only computed in "dense" mode to avoid the
-            # (expensive) per-cell head application when only the pooled target is needed.
-            if self.ibot_mode == "dense":
-                B_, E_, H_, W_ = x.shape
-                grid = x.permute(0, 2, 3, 1).reshape(B_, H_ * W_, E_)  # [B, N, E]
-                patch_proj = self.ibot_head(grid)  # [B, N, D]
-                if return_ibot_proj:
-                    outputs["ibot_patch"] = patch_proj
-                if return_ibot_pred:
-                    outputs["ibot_patch_pred"] = self.ibot_predictor(patch_proj)
-            # Pooled projection (used as both the iBOT target and the KoLeo feature in
-            # "pooled" mode). In "dense" mode the per-cell projection above is used instead.
-            else:
-                pooled_ibot = self.ibot_norm(x.mean(dim=[2, 3]))  # [B, E]
-                cls_proj = self.ibot_head(pooled_ibot)  # [B, D]
-                if return_ibot_proj:
-                    outputs["ibot_cls"] = cls_proj
-                if return_ibot_pred:
-                    outputs["ibot_cls_pred"] = self.ibot_predictor(cls_proj)
-
         return outputs
 
 
@@ -409,6 +345,8 @@ class MultiplexImageDecoder(nn.Module):
         hyperkernel_config: dict,
         num_outputs: int = 2,
         block_type: str | type[Block] | dict = "convnext",
+        ibot_head: bool = False,
+        ibot_head_config: dict | None = None,
     ) -> None:
         """
         Args:
@@ -421,6 +359,8 @@ class MultiplexImageDecoder(nn.Module):
             num_outputs (int, optional): Number of output channels per marker. Defaults to 2.
             block_type (str | Type[Block] | dict, optional): Type of block to use.
                 Can be a string (registry name), Block class, or config dict. Defaults to "convnext".
+            ibot_head (bool, optional): Whether to include a projection head after the decoder. Defaults to False.
+            ibot_head_config (dict, optional): Keyword arguments for the DINOHead (e.g. out_dim, hidden_dim).
         """
         super().__init__()
         self.scaling_factor = scaling_factor
@@ -455,6 +395,32 @@ class MultiplexImageDecoder(nn.Module):
         self.pred = nn.Conv2d(
             decoded_embed_dim, scaling_factor**2 * self.num_outputs, kernel_size=1
         )
+        self.use_ibot_head = ibot_head
+        if ibot_head:
+            self.ibot_head = DINOHead(
+                in_dim=decoded_embed_dim, **(ibot_head_config or {})
+            )
+
+    def forward_features(
+        self, x: torch.Tensor, indices: torch.Tensor
+    ) -> torch.Tensor:
+        """Return marker-specific decoder features before the pixel projection."""
+        B, _, H, W = x.shape
+        C = indices.shape[1]
+        x = self.channel_embed(x, indices)
+        x = self.decoder(x.reshape(B * C, self.decoded_embed_dim, H, W))
+        return x.reshape(B, C, self.decoded_embed_dim, H, W)
+
+    def project_ibot(
+        self,
+        features: torch.Tensor,
+        mask: torch.Tensor,
+    ) -> torch.Tensor:
+        """Project decoder features to per-location iBOT prototype logits."""
+        if not self.use_ibot_head:
+            raise ValueError("Decoder was not initialized with ibot_head=True.")
+        tokens = features.permute(0, 1, 3, 4, 2)[mask]
+        return self.ibot_head(tokens)
 
     def forward(self, x: torch.Tensor, indices: torch.Tensor) -> torch.Tensor:
         """Forward pass of the Multiplex Image Decoder.
@@ -471,10 +437,7 @@ class MultiplexImageDecoder(nn.Module):
         N = B * C
         E, A, O = self.decoded_embed_dim, self.scaling_factor, self.num_outputs
 
-        x = self.channel_embed(x, indices)  # [B, C, E, H, W]
-        x = x.reshape(N, E, H, W)
-
-        x = self.decoder(x)
+        x = self.forward_features(x, indices).reshape(N, E, H, W)
         x = self.pred(x)
 
         x = x.reshape(N, A, A, O, H, W).reshape(B, C, A, A, O, H, W)
@@ -623,8 +586,6 @@ class MultiplexAutoencoder(nn.Module):
         spatial_mask: torch.Tensor | None = None,
         return_features: bool = False,
         return_dino_proj: bool = False,
-        return_ibot_proj: bool = False,
-        return_ibot_pred: bool = False,
     ) -> dict:
         """Encode the input images using the encoder.
 
@@ -635,10 +596,6 @@ class MultiplexAutoencoder(nn.Module):
             return_features (bool, optional): If True, returns the features after encoding. Defaults to False.
             return_dino_proj (bool, optional): If True, returns the output of the projection head on global average pooled
                 latent. Defaults to False.
-            return_ibot_proj (bool, optional): If True, returns the continuous vMF projection of the pooled
-                latent (under 'ibot_cls') and of every latent cell (under 'ibot_patch'). Defaults to False.
-            return_ibot_pred (bool, optional): If True, returns the student vMF predictor outputs (mean
-                direction ++ concentration kappa) under 'ibot_cls_pred'/'ibot_patch_pred'. Defaults to False.
 
         Returns:
             dict: A dictionary containing the encoded images tensor (under 'output') and optionally the features.
@@ -649,8 +606,6 @@ class MultiplexAutoencoder(nn.Module):
             spatial_mask=spatial_mask,
             return_features=return_features,
             return_dino_proj=return_dino_proj,
-            return_ibot_proj=return_ibot_proj,
-            return_ibot_pred=return_ibot_pred,
         )
         return encoding_output
 
@@ -679,8 +634,6 @@ class MultiplexAutoencoder(nn.Module):
         spatial_mask: torch.Tensor | None = None,
         return_features: bool = False,
         return_dino_proj: bool = False,
-        return_ibot_proj: bool = False,
-        return_ibot_pred: bool = False,
     ) -> dict:
         """Forward pass of the Multiplex Autoencoder.
 
@@ -694,10 +647,6 @@ class MultiplexAutoencoder(nn.Module):
             return_features (bool, optional): If True, returns the features after encoding. Defaults to False.
             return_dino_proj (bool, optional): If True, returns the output of the projection head on global average pooled
                 latent. Defaults to False.
-            return_ibot_proj (bool, optional): If True, returns the continuous vMF projection of the pooled
-                latent (under 'ibot_cls') and of every latent cell (under 'ibot_patch'). Defaults to False.
-            return_ibot_pred (bool, optional): If True, returns the student vMF predictor outputs (mean
-                direction ++ concentration kappa) under 'ibot_cls_pred'/'ibot_patch_pred'. Defaults to False.
 
         Returns:
             dict: A dictionary containing the reconstructed images tensor (under 'output') and optionally the features.
@@ -708,8 +657,6 @@ class MultiplexAutoencoder(nn.Module):
             spatial_mask=spatial_mask,
             return_features=return_features,
             return_dino_proj=return_dino_proj,
-            return_ibot_proj=return_ibot_proj,
-            return_ibot_pred=return_ibot_pred,
         )
         x = encoding_output["output"]
         x = self.decode(x, decoded_indices)
@@ -718,7 +665,4 @@ class MultiplexAutoencoder(nn.Module):
             outputs["features"] = encoding_output["features"]
         if return_dino_proj and "cls" in encoding_output:
             outputs["cls"] = encoding_output["cls"]
-        for key in ("ibot_cls", "ibot_patch", "ibot_cls_pred", "ibot_patch_pred"):
-            if key in encoding_output:
-                outputs[key] = encoding_output[key]
         return outputs

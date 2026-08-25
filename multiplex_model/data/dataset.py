@@ -1,12 +1,16 @@
+import json
 import os
 import random
+from concurrent.futures import ThreadPoolExecutor
 from glob import glob
+from pathlib import Path
 from typing import Literal
 
 import numpy as np
 import tifffile
 import torch
 from torch.utils.data import Dataset, Sampler
+from tqdm import tqdm
 
 from .transforms import (
     OutlierPruning,
@@ -43,6 +47,9 @@ class MultiplexDataset(Dataset):
             "scaling",
         ],
         file_extension: Literal["tiff", "npy"] = "tiff",
+        skip_too_small: bool = False,
+        min_image_size: int | tuple[int, int] | None = None,
+        image_size_workers: int = 4,
         preprocessing_kwargs: dict = {},
         denoising_kwargs: dict = {},
         scaling_kwargs: dict = {},
@@ -71,6 +78,12 @@ class MultiplexDataset(Dataset):
             operation_order (list[str], optional): Order of operations to be applied.
                 Defaults to ['transform', 'preprocessing', 'denoising', 'scaling', 'normalization'].
             file_extension (Literal['tiff', 'npy'], optional): File extension of the images. Defaults to 'tiff'.
+            skip_too_small (bool, optional): Whether to exclude images smaller than
+                `min_image_size` during dataset construction. Defaults to False.
+            min_image_size (int or tuple[int, int], optional): Minimum image height and
+                width. An integer applies the same threshold to both dimensions.
+            image_size_workers (int, optional): Number of parallel workers used to inspect
+                images not found in the size metadata cache. Defaults to 4.
             preprocessing_kwargs (dict, optional): Additional keyword arguments for preprocessing function. Defaults to {}.
             denoising_kwargs (dict, optional): Additional keyword arguments for denoising function. Defaults to {}.
             scaling_kwargs (dict, optional): Additional keyword arguments for scaling function. Defaults to {}.
@@ -130,6 +143,65 @@ class MultiplexDataset(Dataset):
             tiffs = glob(os.path.join(img_path, dataset, "imgs", f"*.{file_extension}"))
             self.imgs.extend([(tiff, dataset) for tiff in tiffs])
 
+        self.file_extension = file_extension
+        self.read_file_func = (
+            tifffile.imread if self.file_extension == "tiff" else np.load
+        )
+
+        if skip_too_small:
+            if min_image_size is None:
+                raise ValueError("min_image_size must be set when skip_too_small=True")
+            if isinstance(min_image_size, int):
+                min_height = min_width = min_image_size
+            else:
+                min_height, min_width = min_image_size
+            if min_height <= 0 or min_width <= 0:
+                raise ValueError("min_image_size dimensions must be positive")
+            if image_size_workers <= 0:
+                raise ValueError("image_size_workers must be positive")
+
+            image_sizes = self._load_image_sizes(
+                img_path,
+                split,
+                image_size_workers,
+            )
+
+            kept_images = []
+            size_filter_stats = {
+                dataset: {"total": 0, "kept": 0, "skipped": 0}
+                for dataset in panels_config["datasets"]
+            }
+            for image_path, dataset in self.imgs:
+                stats = size_filter_stats[dataset]
+                stats["total"] += 1
+                if self._has_minimum_size(
+                    image_path,
+                    min_height,
+                    min_width,
+                    image_sizes[image_path],
+                ):
+                    kept_images.append((image_path, dataset))
+                    stats["kept"] += 1
+                else:
+                    stats["skipped"] += 1
+            self.imgs = kept_images
+
+            print(
+                f"Image-size filtering for split '{split}' "
+                f"(minimum {min_height}x{min_width}):"
+            )
+            for dataset, stats in size_filter_stats.items():
+                print(
+                    f"  {dataset}: kept {stats['kept']}, skipped {stats['skipped']}, "
+                    f"total {stats['total']}"
+                )
+            total_images = sum(stats["total"] for stats in size_filter_stats.values())
+            total_kept = sum(stats["kept"] for stats in size_filter_stats.values())
+            print(
+                f"  Overall: kept {total_kept}, skipped {total_images - total_kept}, "
+                f"total {total_images}"
+            )
+
         # Transformations declaration
         ds_percentiles = panels_config.get("clip_limits", None)
         ds_marker_stats = panels_config.get("marker_stats", None)
@@ -175,10 +247,86 @@ class MultiplexDataset(Dataset):
             operation_order=operation_order,
         )
 
-        self.file_extension = file_extension
-        self.read_file_func = (
-            tifffile.imread if self.file_extension == "tiff" else np.load
-        )
+    def _load_image_sizes(
+        self,
+        image_root: str,
+        split: str,
+        workers: int,
+    ) -> dict[str, tuple[int, int]]:
+        cache_path = Path(image_root) / ".multiplex_image_sizes.json"
+        try:
+            with cache_path.open() as cache_file:
+                cache_data = json.load(cache_file)
+            if cache_data.get("version") != 2:
+                cache_data = {"version": 2, "images": {}}
+        except (FileNotFoundError, json.JSONDecodeError, OSError, AttributeError):
+            cache_data = {"version": 2, "images": {}}
+
+        cached_images = cache_data.setdefault("images", {})
+        image_sizes = {}
+        images_to_read = []
+        for image_path, _ in self.imgs:
+            cache_key = os.path.relpath(image_path, image_root)
+            cached = cached_images.get(cache_key)
+            if cached:
+                image_sizes[image_path] = (cached["height"], cached["width"])
+            else:
+                images_to_read.append((image_path, cache_key))
+
+        with tqdm(
+            total=len(self.imgs),
+            initial=len(image_sizes),
+            desc=f"Checking {split} image sizes",
+            unit="image",
+        ) as progress:
+            if images_to_read:
+                with ThreadPoolExecutor(max_workers=workers) as executor:
+                    sizes = executor.map(
+                        self._read_image_size,
+                        (image_path for image_path, _ in images_to_read),
+                    )
+                    for (image_path, cache_key), (height, width) in zip(
+                        images_to_read,
+                        sizes,
+                    ):
+                        image_sizes[image_path] = (height, width)
+                        cached_images[cache_key] = {
+                            "height": height,
+                            "width": width,
+                        }
+                        progress.update()
+
+        if images_to_read:
+            temporary_path = cache_path.with_name(
+                f"{cache_path.name}.{os.getpid()}.tmp"
+            )
+            with temporary_path.open("w") as cache_file:
+                json.dump(cache_data, cache_file)
+            os.replace(temporary_path, cache_path)
+
+        return image_sizes
+
+    def _read_image_size(self, image_path: str) -> tuple[int, int]:
+        if self.file_extension == "tiff":
+            with tifffile.TiffFile(image_path) as image_file:
+                shape = image_file.series[0].shape
+        else:
+            shape = np.load(image_path, mmap_mode="r").shape
+        if len(shape) < 2:
+            return 0, 0
+        height, width = shape[-2:]
+        return int(height), int(width)
+
+    def _has_minimum_size(
+        self,
+        image_path: str,
+        min_height: int,
+        min_width: int,
+        image_size: tuple[int, int] | None = None,
+    ) -> bool:
+        """Check spatial dimensions using the configured image reader."""
+        height, width = image_size or self._read_image_size(image_path)
+        return height >= min_height and width >= min_width
 
     def _prune_unsupported_markers(
         self,

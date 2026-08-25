@@ -28,6 +28,16 @@ decoder:
   decoded_embed_dim: 512
   num_blocks: 1
 
+  # iBOT prototype head on decoder representations before the frozen pixel projection
+  ibot_head: true
+  ibot_head_config:
+    out_dim: 4096
+    hidden_dim: 2048
+    bottleneck_dim: 256
+    n_layers: 3
+    use_bn: false
+    norm_last_layer: true
+
   hyperkernel:
       kernel_size: 1
       padding: 0
@@ -57,11 +67,12 @@ data_config:
 
 # Training configuration
 device: cuda
-lr: 5e-4
+lr: 2e-4
 final_lr: 1e-5
-weight_decay: 0.0001
+weight_decay: 0.04
+final_weight_decay: 0.4
 gradient_accumulation_steps: 1
-epochs: 10
+epochs: 100
 frac_warmup_steps: 0.1
 min_channels_frac: 0.75
 spatial_masking_ratio: 0.6
@@ -72,15 +83,19 @@ checkpoints_dir: checkpoints
 save_checkpoint_freq: 5
 beta: 0.5
 
-# DINOv2 self-distillation configuration
-num_global_views: 2
-recon_loss_weight: 1.0
+# DINOv2 + iBOT self-distillation configuration
+compile_encoder: true
+global_crop_size: [128, 128]
+local_crop_size: [64, 64]
+num_global_views: 1
+num_local_views: 3
 dino_loss_weight: 1.0
+ibot_loss_weight: 1.0
 koleo_loss_weight: 0.1
 student_temp: 0.1
 teacher_temp: 0.04
 warmup_teacher_temp: 0.04
-warmup_teacher_temp_epochs: 0
+warmup_teacher_temp_epochs: 10
 center_momentum: 0.9
 momentum_teacher: 0.996
 freeze_last_layer_epochs: 1

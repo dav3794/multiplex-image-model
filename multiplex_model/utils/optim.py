@@ -34,6 +34,18 @@ class ClampWithGrad(torch.autograd.Function):
         return grad_input, None, None
 
 
+def cosine_schedule_at(
+    step: int, total_steps: int, start_value: float, end_value: float
+) -> float:
+    """Cosine-interpolate a scalar from start to end over optimizer steps."""
+    if total_steps <= 1:
+        return end_value
+    progress = min(max(step / (total_steps - 1), 0.0), 1.0)
+    return end_value + (start_value - end_value) * 0.5 * (
+        1.0 + cos(pi * progress)
+    )
+
+
 def get_scheduler_with_warmup(
     optimizer: torch.optim.Optimizer,
     num_warmup_steps: int,

@@ -351,10 +351,10 @@ def init_experiment(config: dict[str, Any]) -> None:
 def log_training_metrics(
     loss: float,
     lr: float,
-    mu: float,
-    logvar: float,
-    mae: float,
-    mse: float,
+    mu: float | None = None,
+    logvar: float | None = None,
+    mae: float | None = None,
+    mse: float | None = None,
     step: int | None = None,
     extra_metrics: dict[str, float] | None = None,
 ) -> None:
@@ -374,14 +374,16 @@ def log_training_metrics(
     if _experiment is None:
         return
 
-    metrics = {
-        "train/loss": loss,
-        "train/lr": lr,
+    metrics = {"train/loss": loss, "train/lr": lr}
+    reconstruction_metrics = {
         "train/µ": mu,
         "train/logvar": logvar,
         "train/mae": mae,
         "train/mse": mse,
     }
+    metrics.update(
+        {name: value for name, value in reconstruction_metrics.items() if value is not None}
+    )
     if extra_metrics:
         metrics.update(
             {f"train/{name}": value for name, value in extra_metrics.items()}
