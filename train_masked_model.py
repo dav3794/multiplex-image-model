@@ -59,7 +59,7 @@ def train_masked(
 ):
     """Train a masked autoencoder (decode the remaining channels) with the given parameters."""
     model.train()
-    scaler = GradScaler()
+    scaler = GradScaler(enabled=False)
     run_name = get_run_name()
 
     if not os.path.exists(checkpoints_path):
@@ -104,7 +104,7 @@ def train_masked(
                 torch.nn.utils.clip_grad_norm_(model.parameters(), max_norm=1.0)
                 scaler.step(optimizer)
                 scaler.update()
-                optimizer.zero_grad()
+                optimizer.zero_grad(set_to_none=True)
                 scheduler.step()
 
                 log_training_metrics(
@@ -190,8 +190,10 @@ def test_masked(
         for idx, (img, channel_ids, panel_idx, img_path) in enumerate(
             tqdm(test_dataloader, desc=f"Testing epoch {epoch}")
         ):
-            img = img.to(device, dtype=torch.float32)
-            channel_ids = channel_ids.to(device, dtype=torch.long)
+            img = img.to(device, dtype=torch.float32, non_blocking=True)
+            channel_ids = channel_ids.to(
+                device, dtype=torch.long, non_blocking=True
+            )
 
             # Apply channel masking (only full channel masking for validation, no channel dropping)
             _, _, masked_img, active_channel_ids = apply_channel_masking(
@@ -303,6 +305,8 @@ if __name__ == "__main__":
 
     device = config.device
     print(f"Using device: {device}")
+    if str(device).startswith("cuda"):
+        torch.backends.cudnn.benchmark = False
 
     SIZE = config.input_image_size
     BATCH_SIZE = config.batch_size
@@ -382,6 +386,9 @@ if __name__ == "__main__":
         start_epoch = checkpoint.get("epoch", -1) + 1
     else:
         model = MultiplexAutoencoder(**model_config).to(device)
+    if config.compile_model:
+        print("Compiling masked autoencoder...")
+        model.compile(dynamic=True)
 
     # Setup optimizer and scheduler
     total_steps = (
@@ -391,7 +398,10 @@ if __name__ == "__main__":
     num_annealing_steps = total_steps - num_warmup_steps
 
     optimizer = optim.AdamW(
-        model.parameters(), lr=config.peak_lr, weight_decay=config.weight_decay
+        model.parameters(),
+        lr=config.peak_lr,
+        weight_decay=config.weight_decay,
+        fused=str(device).startswith("cuda"),
     )
     scheduler = get_scheduler_with_warmup(
         optimizer,

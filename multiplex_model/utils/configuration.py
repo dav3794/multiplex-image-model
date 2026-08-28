@@ -423,6 +423,11 @@ def load_normalization_stats_csv(path: str) -> dict[str, dict[str, list[float]]]
 class TrainingConfig(BaseModel):
     """Pydantic model for training configuration with validation."""
 
+    compile_model: bool = Field(
+        default=False,
+        description="Compile the model forward pass with dynamic shapes",
+    )
+
     # Data parameters
     device: str = Field(
         ..., description="Device to use for training (e.g., 'cuda', 'cpu')"
